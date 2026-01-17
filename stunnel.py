@@ -1,0 +1,196 @@
+import asyncio
+import ssl
+import yaml
+import time
+import logging
+import itertools
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
+
+
+# ----------------------------
+# Logging
+# ----------------------------
+
+def setup_logging(level: str):
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s | %(levelname)-5s | %(message)s",
+    )
+
+
+# ----------------------------
+# Data models
+# ----------------------------
+
+@dataclass
+class BackendPool:
+    backends: List[Tuple[str, int]]
+    cycle: itertools.cycle
+
+    @classmethod
+    def from_list(cls, items):
+        backends = [(h, int(p)) for h, p in items]
+        return cls(backends, itertools.cycle(backends))
+
+    def next(self):
+        return next(self.cycle)
+
+
+@dataclass
+class ListenerConfig:
+    name: str
+    host: str
+    port: int
+    sni_map: Dict[str, BackendPool]
+    default_pool: BackendPool
+
+
+# ----------------------------
+# Proxy logic
+# ----------------------------
+
+async def pipe(reader, writer, counter):
+    try:
+        while True:
+            data = await reader.read(16384)
+            if not data:
+                break
+
+            counter[0] += len(data)
+            writer.write(data)
+            await writer.drain()
+    except Exception:
+        pass
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def handle_connection(reader, writer, listener: ListenerConfig):
+    start_time = time.time()
+    peer = writer.get_extra_info("peername")
+    sslobj = writer.get_extra_info("ssl_object")
+    sni = getattr(sslobj, "sni", None) if sslobj else None
+
+    pool = listener.sni_map.get(sni, listener.default_pool)
+    backend_host, backend_port = pool.next()
+
+    log_prefix = (
+        f"[{listener.name}] "
+        f"client={peer[0]}:{peer[1]} "
+        f"sni={sni or '-'} "
+        f"-> {backend_host}:{backend_port}"
+    )
+
+    logging.info(f"{log_prefix} connected")
+
+    try:
+        backend_reader, backend_writer = await asyncio.open_connection(
+            backend_host, backend_port
+        )
+    except Exception as e:
+        logging.error(f"{log_prefix} backend connect failed: {e}")
+        writer.close()
+        return
+
+    up = [0]
+    down = [0]
+
+    await asyncio.gather(
+        pipe(reader, backend_writer, up),     # client -> backend
+        pipe(backend_reader, writer, down),   # backend -> client
+    )
+
+    duration = time.time() - start_time
+    logging.info(
+        f"{log_prefix} closed "
+        f"up={up[0]}B down={down[0]}B "
+        f"time={duration:.2f}s"
+    )
+
+
+# ----------------------------
+# TLS context
+# ----------------------------
+
+def create_ssl_context(certfile, keyfile):
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile, keyfile)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    def sni_cb(sslobj, server_name, sslctx):
+        sslobj.sni = server_name
+
+    ctx.set_servername_callback(sni_cb)
+    return ctx
+
+
+# ----------------------------
+# Config loader
+# ----------------------------
+
+def load_config(path: str) -> Tuple[ssl.SSLContext, List[ListenerConfig]]:
+    with open(path) as f:
+        cfg = yaml.safe_load(f)["stunnel"]
+
+    setup_logging(cfg.get("log_level", "INFO"))
+    ssl_ctx = create_ssl_context(cfg["certfile"], cfg["keyfile"])
+
+    listeners = []
+
+    for l in cfg["listeners"]:
+        host, port = l["listen"].split(":")
+
+        sni_map = {
+            sni: BackendPool.from_list(
+                [tuple(b.split(":")) for b in backends]
+            )
+            for sni, backends in l.get("sni", {}).items()
+        }
+
+        default_pool = BackendPool.from_list(
+            [tuple(b.split(":")) for b in l["default_backend"]]
+        )
+
+        listeners.append(
+            ListenerConfig(
+                name=l["name"],
+                host=host,
+                port=int(port),
+                sni_map=sni_map,
+                default_pool=default_pool,
+            )
+        )
+
+    return ssl_ctx, listeners
+
+
+# ----------------------------
+# Main
+# ----------------------------
+
+async def main(config_path: str):
+    ssl_ctx, listeners = load_config(config_path)
+
+    servers = []
+    for l in listeners:
+        server = await asyncio.start_server(
+            lambda r, w, l=l: handle_connection(r, w, l),
+            l.host,
+            l.port,
+            ssl=ssl_ctx,
+        )
+        servers.append(server)
+        logging.info(f"[{l.name}] listening on {l.host}:{l.port}")
+
+    await asyncio.gather(*(s.serve_forever() for s in servers))
+
+
+if __name__ == "__main__":
+    import sys
+    asyncio.run(main(sys.argv[1]))

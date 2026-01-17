@@ -1,0 +1,109 @@
+tmux_manager:
+  launch_commands:
+  - echo \"Manager started at $(date)\" >> echo.txt
+  services:
+    telegram_bot:
+      command: python3 telegram_bot.py
+      enabled: true
+      keep_alive: true
+    stunnel:
+      command: python3 stunnel.py config.yaml
+      enabled: false
+      keep_alive: true
+    websocket:
+      command: python3 websocket.py
+      enabled: true
+      keep_alive: true
+    dropbear:
+      command: dropbear -EFR -p 127.0.0.1:23 -W 65536
+      enabled: true
+      keep_alive: true
+    badvpn:
+      command: ./badvpn-udpgw64 --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 1000 --client-socket-sndbuf 0 --udp-mtu 9000
+      enabled: true
+      keep_alive: true
+    zivpn:
+      command: ./chrootzivpn amd
+      enabled: true
+      keep_alive: true
+telegram_bot:
+  db_file: "users.db"
+  config_file: "./config.json"
+  default_password: "123"
+  token: "CHANGE!"
+  admin_ids:
+    - CHANGE!
+  manage_ssh: true
+  domain: "CHANGE!"
+  is_android: false
+
+  default_service_config:
+    listen: ":5667"
+    cert: "/etc/zivpn/zivpn.crt"
+    key: "/etc/zivpn/zivpn.key"
+    obfs: "zivpn"
+    auth:
+      mode: "passwords"
+stunnel:
+  certfile: server.crt
+  keyfile: server.key
+  log_level: INFO
+  listeners:
+    - name: https-main
+      listen: 0.0.0.0:443
+      default_backend:
+        - 127.0.0.1:23
+      sni:
+        example.com:
+          - 127.0.0.1:8081
+          - 127.0.0.1:8082
+        api.example.com:
+          - 127.0.0.1:22
+    - name: alt-port
+      listen: 0.0.0.0:8443
+      default_backend:
+        - 127.0.0.1:7000
+websocket:
+  # WebSocket Tunnel Server Configuration
+  ports: # Port Configuration
+    http: [80, 8080, 8000, 8880]      # HTTP ports (plain text)
+    https: [8443]           # HTTPS ports (SSL/TLS)
+    enable_ssl: true             # Enable HTTPS servers
+  backend: # Backend Server (SSH, telnet, etc.)
+    host: "127.0.0.1"           # Backend server address
+    port: 23                     # Backend server port
+    max_retries: 3               # Connection retry attempts
+    retry_delay: 0.5             # Seconds between retries
+  ssl: # SSL/TLS Settings
+    cert_file: "./server.crt"   # SSL certificate file
+    key_file: "./server.key"    # SSL private key file
+    min_tls_version: "1.1"      # Minimum TLS version (1.0, 1.1, 1.2, 1.3) (1.0 deprecated error)
+  server: # Server Settings
+    bind_address: "0.0.0.0"     # Listen on all interfaces
+    max_connections: 100         # Maximum concurrent connections per port
+    buffer_size: 8192            # Socket buffer size in bytes
+  timeouts: # Timeout Settings (seconds)
+    initial: 3                   # Wait for initial client data
+    split: 2                     # Wait for split HTTP packets
+    connection: 60               # Data forwarding timeout
+  http: # HTTP/WebSocket Behavior
+    response_mode: "auto"        # Response mode: auto, 101 Switching Protocols, 200 OK, 100 Continue
+    handle_split: true           # Handle split HTTP requests
+    custom_response_text: ""     # Custom status text (e.g., "Tunnel Ready"), empty = defaults
+  performance: # Performance Tuning
+    enable_nodelay: true         # Disable Nagle's algorithm (lower latency)
+    enable_keepalive: true       # Enable TCP keepalive
+    keepalive_idle: 60           # Seconds before sending keepalive probes
+    keepalive_interval: 10       # Seconds between keepalive probes
+    keepalive_count: 3           # Failed probes before closing connection
+  logging: # Logging Configuration
+    level: "INFO"                # Log level: DEBUG, INFO, WARNING, ERROR
+    file: "./websocket.log"      # Log file path (empty to disable)
+    format: "detailed"           # Log format: simple or detailed
+  monitoring: # Monitoring & Statistics
+    stats_interval: 60          # Log statistics every N seconds (0 = disabled, recommended: 60-600)
+    log_connections: true        # Log individual connection open/close
+    show_bytes_human: true       # Display KB/MB instead of raw bytes
+  errors: # Error Handling
+    ignore_early_reset: true     # Don't log immediate disconnects (reduces noise)
+
