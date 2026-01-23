@@ -24,11 +24,15 @@ tmux_manager:
       keep_alive: true
     zivpn:
       command: ./chrootzivpn amd
+      enabled: false
+      keep_alive: true
+    udp-custom:
+      command: ./udp-custom -c config.json
       enabled: true
       keep_alive: true
     xray:
       command: /usr/local/bin/xray run -config /usr/local/etc/xray/config.json
-      enabled: disable
+      enabled: false
       keep_alive: true
 telegram_bot:
   db_file: "users.db"
@@ -110,5 +114,6 @@ websocket:
     show_bytes_human: true       # Display KB/MB instead of raw bytes
   errors: # Error Handling
     ignore_early_reset: true     # Don't log immediate disconnects (reduces noise)
+
 
 
