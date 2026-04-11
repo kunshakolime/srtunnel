@@ -13,7 +13,26 @@ from helpers.auth import verify_linux_login, create_token, get_current_user, sto
 from helpers import core, system, dns
 from helpers import speedtest as st
 from helpers import services as svc_helper
-import yaml, secrets
+import yaml, secrets, logging
+
+logger = logging.getLogger("srapi")
+
+def run_launch_commands():
+    """Run manager.launch_commands from config.yaml once at startup."""
+    path = Path("/root/srtunnel/config.yaml")
+    if not path.exists():
+        return
+    block = (yaml.safe_load(path.read_text()) or {}).get("manager", {})
+    for cmd in (block.get("launch_commands") or []):
+        try:
+            subprocess.run(cmd, shell=True, check=True)
+            logger.info("launch_command ok: %s", cmd)
+        except subprocess.CalledProcessError as e:
+            logger.warning("launch_command failed: %s — %s", cmd, e)
+
+@app.on_event("startup")
+def on_startup():
+    run_launch_commands()
 
 def load_config():
     path = Path("/root/srtunnel/config.yaml")
@@ -331,6 +350,7 @@ class ServiceStatusRequest(BaseModel):
 
 @app.get("/api/services")
 def list_services(lines: int = 10, user: str = Depends(get_current_user)):
+    svc_helper.watcher.reload_config()
     return {
         "watcher": svc_helper.watcher.active,
         "services": svc_helper.watcher.list_services(lines=lines),
