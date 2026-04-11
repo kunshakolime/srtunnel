@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>srtunnel dashboard</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ── LOGIN ─────────────────────────────────────────────────────────────── -->
+<div id="loginPage" class="login-wrap">
+  <div class="login-box">
+    <div class="login-logo">sr<span>tunnel</span></div>
+    <div class="login-sub">Add a server to get started</div>
+
+    <div class="field"><label>Server Name</label>
+      <input id="serverName" placeholder="My Server">
+    </div>
+    <div class="field"><label>API URL</label>
+      <input id="apiUrl" placeholder="http://127.0.0.1:8000">
+    </div>
+    <div class="field"><label>Username</label>
+      <input id="loginUser" placeholder="root">
+    </div>
+    <div class="field"><label>Password</label>
+      <input id="loginPass" type="password" placeholder="••••••••">
+    </div>
+    <div class="divider">or use token directly</div>
+    <div class="field">
+      <input id="loginToken" placeholder="Bearer token">
+    </div>
+    <button class="btn" style="width:100%;margin-top:6px;padding:11px" onclick="doLogin()">Connect &amp; Save Server</button>
+    <div id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ── APP ───────────────────────────────────────────────────────────────── -->
+<div id="app" class="app">
+
+  <!-- Server Hub -->
+  <div class="hub" id="serverHub">
+    <div class="hub-servers" id="hubServers"></div>
+    <div class="hub-right">
+      <button class="hub-add" onclick="openModal('addServerModal')" title="Add server">＋</button>
+      <button class="hub-logout" onclick="logout()" title="Logout">↩</button>
+    </div>
+  </div>
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="nav">
+      <button class="active" onclick="showPage('dashboard',this)">Dashboard</button>
+      <button onclick="showPage('users',this)">Users</button>
+      <button onclick="showPage('services',this)">Services</button>
+      <button onclick="showPage('speedtest',this)">Speed Test</button>
+      <button onclick="showPage('dns',this)">DNS</button>
+      <button onclick="showPage('backup',this)">Backup</button>
+      <button onclick="showPage('scope',this)">Scope</button>
+      <button onclick="showPage('servers',this)">Servers &amp; Tokens</button>
+    </div>
+    <div class="top-right">
+      <span id="refreshStamp" class="refresh-stamp" onclick="manualRefresh()" title="Click to refresh now"></span>
+      <button class="btn-sm" id="tokenCopyBtn" onclick="copySessionToken()" title="Copy your session token">copy token</button>
+      <span id="topUser"></span>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- DASHBOARD -->
+    <div id="page-dashboard" class="page active">
+      <div class="section-header">
+        <h3>System Overview</h3>
+      </div>
+      <div class="metric-grid" id="metrics">
+        <div class="metric"><div class="metric-label">Loading…</div></div>
+      </div>
+      <div class="card">
+        <h4>Bandwidth</h4>
+        <div style="display:flex;gap:40px">
+          <div>
+            <div class="metric-label">Download</div>
+            <div id="bwDown" class="metric-value" style="font-size:18px;margin-top:6px">—</div>
+          </div>
+          <div>
+            <div class="metric-label">Upload</div>
+            <div id="bwUp" class="metric-value" style="font-size:18px;margin-top:6px">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- USERS -->
+    <div id="page-users" class="page">
+      <div class="section-header">
+        <h3>User Management</h3>
+        <div class="hdr-actions">
+          <button class="btn-sm" onclick="doSync()">↺ Sync</button>
+          <button class="btn" onclick="openModal('addUserModal')">+ Add User</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>User</th><th>Password</th><th>Status</th>
+            <th>Type</th><th>Expiry</th><th>Logins</th><th>Conns</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SERVICES -->
+    <div id="page-services" class="page">
+      <div class="section-header">
+        <h3>Services</h3>
+        <div class="hdr-actions">
+          <span id="watcher-badge" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:6px;font-weight:600"></span>
+          <button id="watcher-toggle-btn" class="btn-sm" onclick="toggleWatcher()">…</button>
+          <button class="btn-sm" onclick="loadServices()">↺ Refresh</button>
+        </div>
+      </div>
+      <div id="servicesList"></div>
+    </div>
+
+    <!-- SPEED TEST -->
+    <div id="page-speedtest" class="page">
+      <div class="section-header"><h3>Speed Test</h3></div>
+      <div class="card">
+        <div class="speedtest-wrap">
+          <div id="st-status" class="speedtest-status">Ready to test</div>
+          <div class="speedtest-bar"><div id="st-fill" class="speedtest-fill"></div></div>
+          <div id="st-pct" style="font-family:var(--font-mono);font-size:28px;font-weight:600;color:var(--accent);margin:10px 0">—</div>
+          <button id="st-btn" class="btn" style="padding:10px 30px" onclick="runSpeedtest()">▶ Start Test</button>
+          <div id="st-results" class="speed-results" style="display:none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DNS -->
+    <div id="page-dns" class="page">
+      <div class="section-header">
+        <h3>DNS Records</h3>
+        <div class="hdr-actions">
+          <button class="btn" onclick="openModal('dnsModal')">+ New Record</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Proxy</th><th>Action</th></tr></thead>
+          <tbody id="dnsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BACKUP -->
+    <div id="page-backup" class="page">
+      <div class="section-header"><h3>Database Tools</h3></div>
+      <div class="card">
+        <div class="db-tools-grid">
+          <div class="db-tool-section">
+            <h4>Export</h4>
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Download the current users database.</p>
+            <button class="btn-sm" onclick="downloadBackup()">⬇ Download users.db</button>
+          </div>
+          <div class="db-tool-divider"></div>
+          <div class="db-tool-section">
+            <h4>Replace</h4>
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Upload a <code>.db</code> file and <strong>overwrite</strong> the current database entirely.</p>
+            <input type="file" id="dbFileRestore" accept=".db" style="margin-bottom:12px;display:block">
+            <button class="btn-danger" onclick="handleDb('restore')">⚠ Replace Database</button>
+          </div>
+          <div class="db-tool-divider"></div>
+          <div class="db-tool-section">
+            <h4>Merge</h4>
+            <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Import users from another <code>.db</code> file without removing existing ones.</p>
+            <input type="file" id="dbFileMerge" accept=".db" style="margin-bottom:12px;display:block">
+            <button class="btn-sm" onclick="handleDb('merge')">⊕ Merge Users</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCOPE -->
+    <div id="page-scope" class="page">
+      <div class="section-header">
+        <h3>Access Scope</h3>
+        <button class="btn" onclick="saveScope()">Save</button>
+      </div>
+      <div class="scope-grid">
+        <div class="card">
+          <h4>Limits</h4>
+          <div class="form-row"><label>Max Users</label>
+            <input id="sc_max_users" type="number" placeholder="Unlimited">
+          </div>
+          <div class="form-row"><label>Default Expiry (days)</label>
+            <input id="sc_default_expiry" type="number" placeholder="None">
+          </div>
+          <div class="form-row"><label>Max Expiry (days)</label>
+            <input id="sc_max_expiry" type="number" placeholder="None">
+          </div>
+          <div class="form-row"><label>Max Connections per User</label>
+            <input id="sc_max_connections" type="number" placeholder="Unlimited">
+          </div>
+        </div>
+        <div class="card">
+          <h4>Services</h4>
+          <div class="toggle-row">
+            <span style="font-size:13px">SSH / Dropbear</span>
+            <label class="toggle"><input type="checkbox" id="svc_ssh" checked><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SERVERS & TOKENS -->
+    <div id="page-servers" class="page">
+      <div class="section-header">
+        <h3>Servers &amp; Tokens</h3>
+        <button class="btn" onclick="openModal('addServerModal')">＋ Add Server</button>
+      </div>
+      <div class="card home-server-card" id="homeServerCard"></div>
+      <div id="serversList"></div>
+
+      <div class="section-header" style="margin-top:28px">
+        <h4 style="font-size:15px;font-weight:600;color:var(--text1)">API Tokens</h4>
+      </div>
+      <div id="tokensList"></div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /app -->
+
+<!-- ── MODALS ─────────────────────────────────────────────────────────────── -->
+
+<!-- Add User -->
+<div id="addUserModal" class="modal">
+  <div class="modal-box">
+    <h4>Create New User</h4>
+    <div class="form-row"><label>Username *</label><input id="nu_username" placeholder="alice"></div>
+    <div class="form-row"><label>Password</label><input id="nu_password" placeholder="Leave blank to auto-generate"></div>
+    <div class="form-row"><label>Expiry (days)</label><input id="nu_days" type="number" placeholder="Leave blank = never"></div>
+    <div class="form-row"><label>Max Logins</label><input id="nu_maxlogins" type="number" placeholder="Leave blank = unlimited"></div>
+    <div class="form-check">
+      <input type="checkbox" id="nu_temp">
+      <label for="nu_temp">Temporary User</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal('addUserModal')">Cancel</button>
+      <button class="btn" onclick="doAddUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Server -->
+<div id="addServerModal" class="modal">
+  <div class="modal-box">
+    <h4>Add Server</h4>
+    <div class="form-row"><label>Server Name</label><input id="as_name" placeholder="My VPS"></div>
+    <div class="form-row"><label>API URL *</label><input id="as_url" placeholder="http://1.2.3.4:8000"></div>
+    <div class="form-row"><label>Username</label><input id="as_user" placeholder="root"></div>
+    <div class="form-row"><label>Password</label><input id="as_pass" type="password" placeholder="••••••••"></div>
+    <div class="divider">or paste token directly</div>
+    <div class="form-row"><label>Bearer Token</label><input id="as_token" placeholder="Leave blank to login with credentials"></div>
+    <div id="asErr" style="color:var(--red);font-size:12px;min-height:16px;margin-top:4px"></div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal('addServerModal')">Cancel</button>
+      <button class="btn" onclick="doAddServer()">Save Server</button>
+    </div>
+  </div>
+</div>
+
+<!-- DNS New Record -->
+<div id="dnsModal" class="modal">
+  <div class="modal-box">
+    <h4>New DNS Record</h4>
+    <div class="form-row"><label>Type</label>
+      <select id="dns_type">
+        <option>A</option><option>AAAA</option><option>CNAME</option>
+        <option>TXT</option><option>MX</option><option>NS</option>
+      </select>
+    </div>
+    <div class="form-row"><label>Name (subdomain)</label><input id="dns_name" placeholder="sub"></div>
+    <div class="form-row"><label>Value</label><input id="dns_value" placeholder="1.2.3.4"></div>
+    <div class="form-check">
+      <input type="checkbox" id="dns_proxied">
+      <label for="dns_proxied">Proxy through Cloudflare CDN</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal('dnsModal')">Cancel</button>
+      <button class="btn" onclick="doCreateDns()">Create Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change Password -->
+<div id="pwdModal" class="modal">
+  <div class="modal-box">
+    <h4>Change Password: <span id="pwd_username_lbl" style="color:var(--accent)"></span></h4>
+    <div class="form-row"><label>New Password</label>
+      <input id="pwd_new" placeholder="Leave blank to generate random">
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal('pwdModal')">Cancel</button>
+      <button class="btn" onclick="doChangePassword()">Set Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- Expiry -->
+<div id="expiryModal" class="modal">
+  <div class="modal-box">
+    <h4>Modify Expiry: <span id="exp_username_lbl" style="color:var(--accent)"></span></h4>
+    <div class="form-row"><label>Days</label>
+      <input id="exp_days" type="number" placeholder="e.g. 30">
+    </div>
+    <div class="form-check">
+      <input type="checkbox" id="exp_extend">
+      <label for="exp_extend">Extend (add days to current expiry)</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal('expiryModal')">Cancel</button>
+      <button class="btn-danger" onclick="doRemoveExpiry()">Never Expire</button>
+      <button class="btn" onclick="doSetExpiry()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Max Logins -->
+<div id="maxlogModal" class="modal">
+  <div class="modal-box">
+    <h4>Max Logins: <span id="maxlog_username_lbl" style="color:var(--accent)"></span></h4>
+    <div class="form-row"><label>Limit (0 = unlimited)</label>
+      <input id="maxlog_val" type="number" placeholder="0">
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal('maxlogModal')">Cancel</button>
+      <button class="btn" onclick="doSetMaxlogins()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SIDE PANEL ─────────────────────────────────────────────────────────── -->
+<div id="overlay" class="overlay" onclick="closePanel()"></div>
+<div id="userPanel" class="user-panel">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title" id="panel_username"></div>
+      <div style="margin-top:4px" id="panel_badges"></div>
+    </div>
+    <button class="btn-sm btn-icon" onclick="closePanel()">✕</button>
+  </div>
+  <div class="panel-section">
+    <h5>Info</h5>
+    <div class="info-grid" id="panel_info"></div>
+  </div>
+  <div class="panel-section">
+    <h5>Actions</h5>
+    <div class="action-grid" id="panel_actions"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- ── SCRIPTS ────────────────────────────────────────────────────────────── -->
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/pages.js"></script>
+
+</body>
+</html>

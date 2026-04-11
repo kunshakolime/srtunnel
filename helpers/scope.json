@@ -1,0 +1,17 @@
+{
+  "max_users": null,
+  "default_expiry": null,
+  "max_expiry": null,
+  "max_connections": null,
+  "services": {
+    "ssh_dropbear": true,
+    "ssh_ssl": true,
+    "sshws": false,
+    "openvpn": false,
+    "wireguard": false,
+    "vmess": false,
+    "vless": false,
+    "shadowsocks": false,
+    "trojanvpn": false
+  }
+}

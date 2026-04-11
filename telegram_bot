@@ -1,0 +1,969 @@
+#!/root/srtunnel/venv/bin/python
+
+import asyncio, os, shutil, subprocess, logging
+from pathlib import Path
+
+import yaml
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+
+from helpers import system
+from helpers import core
+from helpers import dns
+from helpers import speedtest as st
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+def load_config():
+    path = Path("config.yaml")
+    if not path.exists():
+        raise RuntimeError(f"Missing config file: {path}")
+    app = (yaml.safe_load(path.read_text()) or {}).get("telegram_bot", {})
+    return {
+        "DB_FILE":          app.get("db_file", "users.db"),
+        "CONFIG_FILE":      app.get("config_file", "./zivpn.json"),
+        "DEFAULT_PASSWORD": app.get("default_password", "123"),
+        "TOKEN":            app.get("token"),
+        "ADMIN_IDS":        app.get("admin_ids", []),
+        "DOMAIN":           app.get("domain", ""),
+        "DNSTT":            app.get("dnstt", ""),
+        "KEY":              app.get("slowdnskey", ""),
+        "IFACE":            app.get("interface", "eth0"),
+        "BW_DOWN":          app.get("bandwidth_down", ""),
+        "BW_UP":            app.get("bandwidth_up", ""),
+        # ── DNS / Cloudflare (new) ─────────────────────────────────────────
+        "CF_TOKEN":         app.get("cf_token", ""),
+        "CF_ZONE":          app.get("cf_zone",  ""),
+        "CF_ROOT_DOMAIN": app.get("cf_root_domain", ""),
+    }
+
+cfg = load_config()
+core.init(cfg)   # share config with core
+dns.init(cfg)    # share config with dns helper
+
+TOKEN     = cfg["TOKEN"]
+ADMIN_IDS = cfg["ADMIN_IDS"]
+DOMAIN    = cfg["DOMAIN"]
+DNSTT     = cfg["DNSTT"]
+KEY       = cfg["KEY"]
+IFACE     = cfg["IFACE"]
+BW_DOWN   = cfg["BW_DOWN"]
+BW_UP     = cfg["BW_UP"]
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+def is_admin(user_id):  return user_id in ADMIN_IDS
+
+async def check_admin(update: Update):
+    uid = update.effective_user.id if update.effective_user else None
+    if not uid or not is_admin(uid):
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized")
+        return False
+    return True
+
+
+# ── UI helpers ────────────────────────────────────────────────────────────────
+
+def fmt_user(user):
+    icon    = "✅" if user["status"] == "Active" else "❌"
+    expires = user["expires"][:10] if user["expires"] else "Never"
+    conns   = system.user_connections(user["username"])
+    limit   = f"/{user['max_logins']}" if user["max_logins"] else "/∞"
+    return (
+        f"{icon} *{user['username']}*\n\n"
+        f"`{user['password']}`\n"
+        f"Expires: {expires}\n"
+        f"{'Temporary' if user['temporary'] else 'Permanent'}\n"
+        f"Connections: {conns}{limit}"
+    )
+
+
+def menu_text(live="normal"):
+    ip   = system.public_ip()
+    info = system.system_info()
+    bw   = system.bandwidth_usage(IFACE)
+    users  = core.get_users()
+    active = sum(1 for u in users if u["status"] == "Active")
+    conns  = system.total_connections()
+
+    def fmt_gb(v): return f"{int(v*1024)}mb" if v < 1 else f"{v:.1f}GB"
+
+    lines = ["🤖 *VPN User Management Bot*", "☠ @kunshakolime", f"🌐 Server: `{ip}`"]
+    if DOMAIN: lines.append(f"🔗 Domain: `{DOMAIN}`")
+    if DNSTT:  lines.append(f"📡 DNSTT: `{DNSTT}`")
+    if KEY:
+        try:    key_val = Path(KEY).read_text().strip() if os.path.exists(KEY) else KEY
+        except: key_val = KEY
+        lines.append(f"🔑 Key: `{key_val}`")
+    if bw:
+        dl = f'`{bw["rx"]}`' + (f" / {BW_DOWN}" if BW_DOWN else "")
+        ul = f'`{bw["tx"]}`' + (f" / {BW_UP}"   if BW_UP   else "")
+        lines += [f"⬇️ {dl}", f"⬆️ {ul}"]
+    if info:
+        lines += [
+            f"💻 CPU: {info['cpu']:.0f}%",
+            f"🧠 RAM: {fmt_gb(info['ram_used'])}/{int(round(info['ram_total']))}GB • {info['ram_percent']:.0f}%",
+            f"💾 Disk: {fmt_gb(info['disk_used'])}/{int(round(info['disk_total']))}GB • {info['disk_percent']:.0f}%",
+        ]
+    lines += [f"👥 Users: {active}/{len(users)} active", f"🔌 Connections: {conns}"]
+    lines.append("\n⚡ _Fast refresh_" if live == "fast" else "\n🔄 _Auto-refresh_")
+    return "\n".join(lines)
+
+
+def kb_main():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Add User",         callback_data="add_user"),
+         InlineKeyboardButton("📋 Manage Users",     callback_data="manage_users")],
+        [InlineKeyboardButton("🔄 Sync Now",         callback_data="sync_now"),
+         InlineKeyboardButton("🎯 Services",         callback_data="shoot_server")],
+        [InlineKeyboardButton("🚀 Speed Test",       callback_data="speedtest"),
+         InlineKeyboardButton("💾 Backup / Restore", callback_data="backup_menu")],
+        [InlineKeyboardButton("🌐 DNS Manager",      callback_data="dns_menu")],
+        [InlineKeyboardButton("⚡ Refresh",          callback_data="menu_refresh")],
+    ])
+
+def kb_menu():  return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu",  callback_data="back_to_menu")]])
+def kb_users(): return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Users", callback_data="manage_users")]])
+
+def kb_user_actions(username, is_temporary, is_active):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔑 Password",   callback_data=f"pwd_{username}"),
+         InlineKeyboardButton("⏰ Expiry",     callback_data=f"exp_{username}")],
+        [InlineKeyboardButton("🔒 Max Logins", callback_data=f"maxlog_{username}"),
+         InlineKeyboardButton("→ Permanent" if is_temporary else "→ Temporary", callback_data=f"toggle_{username}")],
+        [InlineKeyboardButton("⏸ Deactivate" if is_active else "▶️ Reactivate",
+                              callback_data=f"{'deact' if is_active else 'react'}_{username}"),
+         InlineKeyboardButton("🗑 Delete",     callback_data=f"del_{username}")],
+        [InlineKeyboardButton("🔙 Users",      callback_data="manage_users")],
+    ])
+
+
+# ── DNS keyboards ─────────────────────────────────────────────────────────────
+
+def kb_dns_main():
+    rows = [
+        [InlineKeyboardButton("➕ New Record",    callback_data="dns_new"),
+         InlineKeyboardButton("📋 List Records",  callback_data="dns_list")],
+        [InlineKeyboardButton("🗑 Delete Record", callback_data="dns_delete_pick")],
+        [InlineKeyboardButton("🔙 Menu",          callback_data="back_to_menu")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+def kb_dns():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 DNS",  callback_data="dns_menu")]])
+
+def kb_dns_types():
+    rows = [[InlineKeyboardButton(t, callback_data=f"dnstype_{t}")] for t in dns.RECORD_TYPES]
+    rows.append([InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")])
+    return InlineKeyboardMarkup(rows)
+
+def kb_dns_proxied(username):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🟠 Proxied (CDN)",  callback_data="dnsproxy_yes"),
+         InlineKeyboardButton("⚪ DNS only",        callback_data="dnsproxy_no")],
+        [InlineKeyboardButton("❌ Cancel",          callback_data="dns_menu")],
+    ])
+
+
+# ── DNS page text ─────────────────────────────────────────────────────────────
+
+def dns_page_text():
+    domain = cfg.get("CF_ROOT_DOMAIN") or cfg.get("DOMAIN", "—")
+    if not dns.is_configured():
+        return f"*🌐 DNS Manager*\n\n`{domain}`\n\n⚠️ Cloudflare not configured.\nAdd `cf_token` and `cf_zone` to config.yaml"
+    return f"*🌐 DNS Manager*\n\n`{domain}`\n\nManage Cloudflare DNS records."
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _cancel_menu_task(context):
+    task = context.user_data.pop("menu_task", None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text=None, fast_burst=False):
+    _cancel_menu_task(context)
+    context.user_data.clear()
+
+    mode    = "fast" if fast_burst else "normal"
+    initial = text or menu_text(live=mode)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(initial, reply_markup=kb_main(), parse_mode="Markdown")
+        chat_id = update.callback_query.message.chat_id
+        msg_id  = update.callback_query.message.message_id
+    else:
+        sent    = await update.message.reply_text(initial, reply_markup=kb_main(), parse_mode="Markdown")
+        chat_id = sent.chat_id
+        msg_id  = sent.message_id
+
+    if text:
+        fast_burst = False
+
+    context.user_data["menu_msg_id"] = msg_id
+
+    async def menu_loop():
+        NORMAL_REFRESH, FAST_REFRESH, FAST_DURATION = 60, 3, 15
+        fast = fast_burst
+        fast_remaining = FAST_DURATION if fast else 0
+        last_text = initial
+        try:
+            while True:
+                if fast and fast_remaining > 0:
+                    await asyncio.sleep(FAST_REFRESH)
+                    fast_remaining -= FAST_REFRESH
+                    mode = "fast" if fast_remaining > 0 else "normal"
+                    if fast_remaining <= 0:
+                        fast = False
+                else:
+                    fast = False
+                    await asyncio.sleep(NORMAL_REFRESH)
+                    mode = "normal"
+
+                if context.user_data.get("menu_msg_id") != msg_id:
+                    return
+
+                t = menu_text(live=mode)
+                if t != last_text:
+                    try:
+                        await context.bot.edit_message_text(
+                            t, chat_id=chat_id, message_id=msg_id,
+                            parse_mode="Markdown", reply_markup=kb_main())
+                        last_text = t
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            pass
+
+    context.user_data["menu_task"] = asyncio.create_task(menu_loop())
+
+
+async def show_user(query, username, context: ContextTypes.DEFAULT_TYPE = None):
+    if context is not None:
+        context.user_data.pop("menu_msg_id", None)
+    user = core.get_user(username)
+    if not user:
+        await query.edit_message_text("❌ User not found", reply_markup=kb_users())
+        return
+    await query.edit_message_text(fmt_user(user), parse_mode="Markdown",
+                                  reply_markup=kb_user_actions(username, user["temporary"], user["status"] == "Active"))
+
+
+def parse_positive_int(text):
+    try:
+        n = int(text)
+        if n <= 0: raise ValueError
+        return n
+    except (ValueError, TypeError):
+        raise ValueError("❌ Invalid number (must be > 0)")
+
+
+# ── Handlers ──────────────────────────────────────────────────────────────────
+
+async def cmd_start(update, context):
+    if not await check_admin(update): return
+    await show_menu(update, context)
+
+async def cmd_cancel(update, context):
+    if not await check_admin(update): return
+    await show_menu(update, context, "❌ Cancelled")
+
+
+async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    try: await q.answer()
+    except Exception: pass
+
+    if not is_admin(q.from_user.id):
+        try: await q.edit_message_text("⛔ Unauthorized")
+        except Exception: pass
+        return
+
+    data = q.data
+
+    def leave_menu():
+        context.user_data.pop("menu_msg_id", None)
+
+    if data == "back_to_menu":
+        await show_menu(update, context)
+
+    elif data == "sync_now":
+        leave_menu()
+        r = core.sync()
+        msg = "✅ Synced"
+        if r["deleted_count"]: msg += f"\n{r['deleted_count']} expired user(s) removed"
+        await q.edit_message_text(msg, reply_markup=kb_menu())
+
+    elif data == "menu_refresh":
+        await show_menu(update, context, fast_burst=True)
+
+    elif data == "speedtest":
+        _cancel_menu_task(context)
+        leave_menu()
+        old_proc = context.user_data.pop("speedtest_proc", None)
+        if old_proc:
+            try: old_proc.kill()
+            except Exception: pass
+
+        proc, progress_file = st.start()
+        context.user_data.update(speedtest_proc=proc, speedtest_file=progress_file, speedtest_cancelled=False)
+
+        kb_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="speedtest_cancel")]])
+        kb_done   = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔄 Test Again", callback_data="speedtest"),
+            InlineKeyboardButton("🔙 Menu",       callback_data="back_to_menu"),
+        ]])
+        chat_id, msg_id = q.message.chat_id, q.message.message_id
+
+        async def run_and_update():
+            last_msg = last_p = None
+            while proc.poll() is None:
+                await asyncio.sleep(1)
+                if context.user_data.get("speedtest_cancelled"): return
+                p = st.poll(progress_file)
+                if p:
+                    last_p = p
+                    pct   = p.get("pct", 0)
+                    speed = p.get("speed", "…")
+                    eta   = p.get("eta")
+                    phase = p.get("phase", "")
+                    bar   = "█" * (pct // 10) + "░" * (10 - pct // 10)
+
+                    if phase in ("starting", "ping"):
+                        status = f"📶 {phase.capitalize()}…"
+                    elif eta:
+                        status = f"⬇️ `{speed}` • ETA {eta}"
+                    else:
+                        status = f"⬇️ `{speed}`"
+
+                    msg = f"*🚀 Speed Test*\n\n`{bar}` {pct}%\n{status}"
+                    if msg != last_msg:
+                        try:
+                            await context.bot.edit_message_text(msg, chat_id=chat_id, message_id=msg_id,
+                                parse_mode="Markdown", reply_markup=kb_cancel)
+                            last_msg = msg
+                        except Exception: pass
+
+            result = st.parse_result(progress_file)   # read BEFORE cleanup
+            st.cleanup(progress_file)
+            context.user_data.pop("speedtest_proc", None)
+            context.user_data.pop("speedtest_file", None)
+            if proc.returncode not in (0, None):
+                final = "🚫 *Cancelled*"
+            else:
+                if result:
+                    final = st.format_result(result, BW_DOWN, BW_UP)
+                elif last_p:
+                    dl    = f"⬇️ `{last_p.get('speed', '?')}`" + (f" / {BW_DOWN}" if BW_DOWN else "")
+                    final = f"*🚀 Speed Test Result*\n\n{dl}"
+                else:
+                    final = "❌ Speed test failed"
+            try:
+                await context.bot.edit_message_text(final, chat_id=chat_id, message_id=msg_id,
+                    parse_mode="Markdown", reply_markup=kb_done)
+            except Exception: pass
+
+        await q.edit_message_text("*🚀 Speed Test*\n\n`░░░░░░░░░░` 0%",
+            parse_mode="Markdown", reply_markup=kb_cancel)
+        asyncio.create_task(run_and_update())
+
+    elif data == "speedtest_cancel":
+        context.user_data["speedtest_cancelled"] = True
+        proc = context.user_data.pop("speedtest_proc", None)
+        path = context.user_data.pop("speedtest_file", None)
+        if proc:
+            try: proc.kill()
+            except Exception: pass
+        if path:
+            st.cleanup(path)  # fixed: was system.speedtest_cleanup
+        await q.edit_message_text("🚫 *Cancelled*", parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔄 Test Again", callback_data="speedtest"),
+                InlineKeyboardButton("🔙 Menu",       callback_data="back_to_menu"),
+            ]]))
+
+    elif data == "backup_menu":
+        leave_menu()
+        await q.edit_message_text("*Database Backup*\n\nChoose an option:", parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 Backup DB",  callback_data="backup_send")],
+                [InlineKeyboardButton("♻️ Restore DB", callback_data="backup_restore")],
+                [InlineKeyboardButton("🔁 Sync DB",    callback_data="backup_sync")],
+                [InlineKeyboardButton("🔙 Menu",       callback_data="back_to_menu")],
+            ]))
+
+    elif data == "backup_send":
+        db = cfg["DB_FILE"]
+        if not os.path.exists(db):
+            await q.edit_message_text("❌ Database not found", reply_markup=kb_menu())
+            return
+        await q.message.reply_document(document=open(db, "rb"), filename="users.db", caption="📦 users.db backup")
+        await show_menu(update, context)
+
+    elif data == "backup_restore":
+        leave_menu()
+        context.user_data["action"] = "restore_db"
+        await q.edit_message_text("*Send users.db file*\n\nThis will REPLACE current database.\n\n/cancel to abort",
+                                   parse_mode="Markdown", reply_markup=kb_menu())
+
+    elif data == "backup_sync":
+        leave_menu()
+        context.user_data["action"] = "sync_db"
+        await q.edit_message_text(
+            "*Send users.db file*\n\nUsers from the file will be merged into the current database.\n\n"
+            "/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_menu())
+
+    elif data == "manage_users":
+        leave_menu()
+        users = core.get_users()
+        if not users:
+            await q.edit_message_text("ℹ️ No users", reply_markup=kb_menu())
+            return
+        context.user_data["user_list"] = users
+        msg = "*All Users*\n\n"
+        for i, u in enumerate(users, 1):
+            icon = "✅" if u["status"] == "Active" else "❌"
+            temp = "⏱" if u["temporary"] else ""
+            c    = system.user_connections(u["username"])
+            conn = f"{c}/{u['max_logins']}🔌" if u["max_logins"] else f"{c}🔌"
+            msg += f"`{i:02d}` {icon}{temp} {conn} `{u['username']}` • `{u['password']}`\n"
+        msg += f"\n*Total: {len(users)} users*\nEnter user number to manage:"
+        keyboard = [
+            [InlineKeyboardButton(str(n), callback_data=f"usernum_{n}") for n in range(s, min(s+9, len(users)+1))]
+            for s in range(1, len(users)+1, 9)
+        ] + [[InlineKeyboardButton("🔙 Menu", callback_data="back_to_menu")]]
+        await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data.startswith("usernum_"):
+        users = context.user_data.get("user_list", [])
+        try:
+            idx = int(data[8:]) - 1
+            await show_user(q, users[idx]["username"], context)
+        except (ValueError, IndexError):
+            await q.edit_message_text("❌ Invalid selection", reply_markup=kb_users())
+
+    elif data.startswith("select_"):    await show_user(q, data[7:], context)
+    elif data.startswith("toggle_"):    core.toggle_temporary(data[7:]); await show_user(q, data[7:], context)
+
+    elif data.startswith("maxlog_"):
+        username = data[7:]
+        user = core.get_user(username)
+        cur  = f"Current: {user['max_logins']}" if user and user["max_logins"] else "Current: Unlimited"
+        context.user_data.update(action="set_maxlogins", maxlogins_username=username)
+        await q.edit_message_text(
+            f"*Max Logins: {username}*\n\n{cur}\n\nSend a number to set a limit, or `0` to remove it.\n\n/cancel to go back",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+
+    elif data.startswith("pwd_") and data not in ("pwd_random", "pwd_custom"):
+        username = data[4:]
+        context.user_data["change_password_username"] = username
+        await q.edit_message_text(f"*Change Password: {username}*\n\nChoose an option:", parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎲 Random", callback_data="pwd_random"),
+                 InlineKeyboardButton("✍️ Custom", callback_data="pwd_custom")],
+                [InlineKeyboardButton("🔙 Back",   callback_data=f"select_{username}")],
+            ]))
+
+    elif data == "pwd_random":
+        username = context.user_data.get("change_password_username")
+        if not username:
+            await q.edit_message_text("❌ Session expired", reply_markup=kb_users())
+            context.user_data.clear(); return
+        ok, old, new = core.change_password(username)
+        if ok:
+            await q.edit_message_text(f"✅ *Password Changed*\n\n`{username}`\n`{old}` → `{new}`",
+                                       parse_mode="Markdown", reply_markup=kb_users())
+        else:
+            await q.edit_message_text("❌ Failed", reply_markup=kb_users())
+        context.user_data.clear()
+
+    elif data == "pwd_custom":
+        username = context.user_data.get("change_password_username")
+        if not username:
+            await q.edit_message_text("❌ Session expired", reply_markup=kb_users())
+            context.user_data.clear(); return
+        context.user_data["action"] = "change_password_custom"
+        await q.edit_message_text(f"*Custom Password for {username}*\n\nSend new password\n\n/cancel to go back",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+
+    elif data.startswith("exp_") and not any(data.startswith(p) for p in ("expset_", "expextend_", "expnever_")):
+        username = data[4:]
+        context.user_data["modify_expiry_username"] = username
+        await q.edit_message_text(f"*Modify Expiration: {username}*\n\nChoose an option:", parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📅 Set",          callback_data=f"expset_{username}")],
+                [InlineKeyboardButton("➕ Extend",       callback_data=f"expextend_{username}")],
+                [InlineKeyboardButton("♾️ Never Expire", callback_data=f"expnever_{username}")],
+                [InlineKeyboardButton("🔙 Back",         callback_data=f"select_{username}")],
+            ]))
+
+    elif data.startswith("expset_"):
+        username = data[7:]
+        context.user_data.update(action="modify_expiry_set", modify_expiry_username=username)
+        await q.edit_message_text(f"*Set Expiry: {username}*\n\nDays from now:\n`7` `30` `365`\n\n/cancel to go back",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+
+    elif data.startswith("expextend_"):
+        username = data[10:]
+        context.user_data.update(action="modify_expiry_extend", modify_expiry_username=username)
+        await q.edit_message_text(f"*Extend Expiry: {username}*\n\nDays to add:\n`7` `30`\n\n/cancel to go back",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+
+    elif data.startswith("expnever_"):
+        username = data[9:]
+        if core.set_expiry(username, None):
+            await q.edit_message_text(f"✅ *{username}*\n\nNow permanent", parse_mode="Markdown", reply_markup=kb_users())
+        else:
+            await q.edit_message_text("❌ Failed", reply_markup=kb_users())
+        context.user_data.clear()
+
+    elif data.startswith("deact_"):
+        username = data[6:]; core.set_active(username, False)
+        await q.edit_message_text(f"⏸ `{username}` deactivated", parse_mode="Markdown", reply_markup=kb_users())
+        context.user_data.clear()
+
+    elif data.startswith("react_"):
+        username = data[6:]; core.set_active(username, True)
+        await q.edit_message_text(f"▶️ `{username}` reactivated", parse_mode="Markdown", reply_markup=kb_users())
+        context.user_data.clear()
+
+    elif data.startswith("del_") and not data.startswith("del_dns_"):
+        username = data[4:]
+        if core.delete_user(username):
+            await q.edit_message_text(f"✅ User `{username}` deleted", parse_mode="Markdown", reply_markup=kb_users())
+        else:
+            await q.edit_message_text("❌ Failed", reply_markup=kb_users())
+        context.user_data.clear()
+
+    elif data == "shoot_server":
+        leave_menu()
+        tmux = shutil.which("tmux")
+        if not tmux:
+            await q.edit_message_text("❌ tmux not found", reply_markup=kb_menu()); return
+        result   = subprocess.run([tmux, "ls"], capture_output=True, text=True)
+        sessions = [l.split(":")[0].strip() for l in result.stdout.splitlines() if ":" in l]
+        if not sessions:
+            await q.edit_message_text("ℹ️ No tmux sessions running", reply_markup=kb_menu()); return
+        keyboard = [[InlineKeyboardButton(f"🎯 {s}", callback_data=f"shootsvc_{s}")] for s in sessions]
+        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="back_to_menu")])
+        await q.edit_message_text("*Running Services*\n\nSelect a service to restart:",
+                                   parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data.startswith("shootsvc_"):
+        service = data[9:]
+        preview = ""
+        config_file = cfg["CONFIG_FILE"]
+        if service == "zivpn" and os.path.exists(config_file):
+            try:
+                content = open(config_file).read()
+                preview = f"\n\n*Config Preview:*\n```\n{content[:400]}\n```"
+                if len(content) > 400: preview += "\n_... (truncated)_"
+            except Exception:
+                preview = "\n\n⚠️ Could not read config"
+        await q.edit_message_text(f"*Restart: {service}*{preview}\n\nConfirm?", parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Confirm", callback_data=f"shootconfirm_{service}")],
+                [InlineKeyboardButton("🔙 Cancel",  callback_data="shoot_server")],
+            ]))
+
+    elif data.startswith("shootconfirm_"):
+        service = data[13:]
+        tmux    = shutil.which("tmux")
+        if tmux:
+            subprocess.run([tmux, "send-keys", "-t", service, "C-c"], check=False)
+            status_text = menu_text(live="normal") + f"\n\n✅ `{service}` restarted"
+            await update.callback_query.edit_message_text(status_text, reply_markup=kb_main(), parse_mode="Markdown")
+            chat_id = update.callback_query.message.chat_id
+            msg_id  = update.callback_query.message.message_id
+            context.user_data.clear()
+            context.user_data["menu_msg_id"] = msg_id
+
+            async def fade_status():
+                await asyncio.sleep(4)
+                if context.user_data.get("menu_msg_id") != msg_id: return
+                try:
+                    await context.bot.edit_message_text(menu_text(live="normal"),
+                        chat_id=chat_id, message_id=msg_id, parse_mode="Markdown", reply_markup=kb_main())
+                except Exception: pass
+                await show_menu(update, context)
+
+            asyncio.create_task(fade_status())
+        else:
+            await update.callback_query.edit_message_text("❌ tmux not found", reply_markup=kb_menu())
+            context.user_data.clear()
+
+    # ── DNS ───────────────────────────────────────────────────────────────────
+
+    elif data == "dns_menu":
+        leave_menu()
+        await q.edit_message_text(dns_page_text(), parse_mode="Markdown", reply_markup=kb_dns_main())
+
+    elif data == "dns_list":
+        if not dns.is_configured():
+            await q.edit_message_text("⚠️ Cloudflare not configured", reply_markup=kb_dns())
+            return
+        try:
+            records = dns.list_records()
+        except RuntimeError as e:
+            await q.edit_message_text(f"❌ CF API error: {e}", reply_markup=kb_dns())
+            return
+        if not records:
+            await q.edit_message_text("ℹ️ No DNS records found", reply_markup=kb_dns())
+            return
+        chunk_size = 20
+        chunks = [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
+        for idx, chunk in enumerate(chunks):
+            lines = [f"*📋 DNS Records ({idx*chunk_size+1}–{idx*chunk_size+len(chunk)} of {len(records)})*\n"]
+            for r in chunk:
+                proxy = "🟠" if r.get("proxied") else "⚪"
+                lines.append(f"{proxy} `{r['name']}` → `{r['content']}` *{r['type']}*")
+            is_last = idx == len(chunks) - 1
+            kb = kb_dns() if is_last else None
+            if idx == 0:
+                await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=kb)
+            else:
+                await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=kb)
+
+    elif data == "dns_new":
+        if not dns.is_configured():
+            await q.edit_message_text("⚠️ Cloudflare not configured", reply_markup=kb_dns())
+            return
+        context.user_data["dns_step"] = "type"
+        await q.edit_message_text("*➕ New DNS Record*\n\nSelect record type:",
+            parse_mode="Markdown", reply_markup=kb_dns_types())
+
+    elif data.startswith("dnstype_"):
+        rtype = data[8:]
+        cf_domain = cfg.get("CF_ROOT_DOMAIN") or cfg.get("DOMAIN", "")
+        context.user_data.update(dns_rtype=rtype, dns_step="name", action="dns_name")
+        await q.edit_message_text(
+            f"*Type: {rtype}*\n\nEnter subdomain name:\n`sub` → `sub.{cf_domain}`\n\n/cancel to go back",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")]]))
+
+    elif data.startswith("dnsproxy_"):
+        proxied  = data == "dnsproxy_yes"
+        rtype    = context.user_data.get("dns_rtype", "A")
+        name     = context.user_data.get("dns_name", "")
+        value    = context.user_data.get("dns_value", "")
+        context.user_data.clear()
+
+        await q.edit_message_text("⏳ Creating record…", parse_mode="Markdown")
+        result = dns.create_record(rtype, name, value, proxied)
+        if result.get("success"):
+            rec   = result["result"]
+            proxy_label = "🟠 Proxied" if proxied else "⚪ DNS only"
+            rid   = rec["id"]
+            msg   = (
+                f"✅ *Record Created*\n\n"
+                f"`{rec['name']}`\n"
+                f"Type: `{rtype}` · {proxy_label}\n"
+                f"Value: `{value}`"
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑 Delete this record", callback_data=f"del_dns_{rid}")],
+                [InlineKeyboardButton("🔙 DNS",               callback_data="dns_menu")],
+            ])
+        else:
+            errors = result.get("errors", [])
+            msg    = f"❌ Failed: {errors[0].get('message') if errors else 'Unknown error'}"
+            kb     = kb_dns()
+        await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=kb)
+
+    elif data.startswith("del_dns_"):
+        record_id = data[8:]
+        result = dns.delete_record(record_id)
+        if result.get("success"):
+            await q.edit_message_text("🗑 Record deleted.", reply_markup=kb_dns())
+        else:
+            await q.edit_message_text("❌ Could not delete record.", reply_markup=kb_dns())
+
+    elif data == "dns_delete_pick":
+        if not dns.is_configured():
+            await q.edit_message_text("⚠️ Cloudflare not configured", reply_markup=kb_dns())
+            return
+        try:
+            records = dns.list_records()
+        except RuntimeError as e:
+            await q.edit_message_text(f"❌ CF API error: {e}", reply_markup=kb_dns())
+            return
+        if not records:
+            await q.edit_message_text("ℹ️ No records to delete", reply_markup=kb_dns())
+            return
+
+        context.user_data["dns_delete_records"] = records
+        context.user_data["action"] = "dns_delete_pick"
+        chunk_size = 20
+        chunks = [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
+        for idx, chunk in enumerate(chunks):
+            lines = [f"*🗑 Delete a Record ({idx*chunk_size+1}–{idx*chunk_size+len(chunk)} of {len(records)})*\n"]
+            for i, r in enumerate(chunk, start=idx*chunk_size+1):
+                proxy = "🟠" if r.get("proxied") else "⚪"
+                lines.append(f"`{i}.` {proxy} `{r['name']}` → `{r['content']}` *{r['type']}*")
+            is_last = idx == len(chunks) - 1
+            if is_last:
+                lines.append("\n_Reply with the record number to delete_")
+            cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")]])
+            if idx == 0:
+                await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=cancel_kb if is_last else None)
+            else:
+                await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=cancel_kb if is_last else None)
+
+    elif data == "add_user":
+        leave_menu()
+        context.user_data["action"] = "add_user"
+        await q.edit_message_text(
+            "*Add User*\n\nFormat:\n`username` `[days]` `[temp]` `[pwd:pass]` `[limit:N]`\n\nExamples:\n"
+            "`alice`\n`alice 30`\n`alice 7 temp`\n`alice pwd:mypass`\n`alice limit:2`\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_menu())
+
+
+async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_admin(update): return
+
+    if update.message.document:
+        action = context.user_data.get("action")
+        if action not in ("restore_db", "sync_db"):
+            await update.message.reply_text("❌ Unexpected file", reply_markup=kb_menu()); return
+        if not update.message.document.file_name.endswith(".db"):
+            await update.message.reply_text("❌ Please send a .db file", reply_markup=kb_menu()); return
+        tmp = "uploaded_users.db"
+        await (await update.message.document.get_file()).download_to_drive(tmp)
+        if action == "restore_db":
+            import shutil as _sh
+            _sh.copy(tmp, cfg["DB_FILE"])
+            os.remove(tmp)
+            core.init_db()
+            core.sync()
+            await update.message.reply_text("✅ Database Restored", reply_markup=kb_menu())
+        else:
+            ok = core.sync_db(tmp)
+            os.remove(tmp)
+            await update.message.reply_text("✅ Database Synced" if ok else "❌ Invalid database file", reply_markup=kb_menu())
+        context.user_data.clear()
+        return
+
+    action = context.user_data.get("action")
+    if not action and "user_list" in context.user_data:
+        try:
+            idx  = int(update.message.text.strip()) - 1
+            user = core.get_user(context.user_data["user_list"][idx]["username"])
+            if not user:
+                await update.message.reply_text("❌ User not found", reply_markup=kb_users()); return
+            await update.message.reply_text(fmt_user(user), parse_mode="Markdown",
+                reply_markup=kb_user_actions(user["username"], user["temporary"], user["status"] == "Active"))
+            return
+        except (ValueError, IndexError): pass
+
+    if not action:
+        await update.message.reply_text("Use /start", reply_markup=kb_menu()); return
+
+    text = update.message.text.strip()
+
+    # ── DNS text input steps ───────────────────────────────────────────────────
+
+    if action == "dns_delete_pick":
+        try:
+            idx = int(text) - 1
+            records = context.user_data.get("dns_delete_records", [])
+            if idx < 0 or idx >= len(records):
+                await update.message.reply_text("❌ Invalid number", reply_markup=kb_dns())
+                context.user_data.clear()
+                return
+            record = records[idx]
+            result = dns.delete_record(record["id"])
+            if result.get("success"):
+                await update.message.reply_text(
+                    f"🗑 Deleted `{record['name']}` ({record['type']})",
+                    parse_mode="Markdown", reply_markup=kb_dns())
+            else:
+                await update.message.reply_text("❌ Could not delete record", reply_markup=kb_dns())
+        except ValueError:
+            await update.message.reply_text("❌ Send a number", reply_markup=kb_dns())
+        context.user_data.clear()
+        return
+
+    if action == "dns_name":
+        cf_domain = cfg.get("CF_ROOT_DOMAIN") or cfg.get("DOMAIN", "")
+        name = text.lower().replace(f".{cf_domain}", "")
+        context.user_data.update(dns_name=name, action="dns_value")
+        rtype = context.user_data.get("dns_rtype", "A")
+        hint = {
+            "A":     "IPv4 address (e.g. `1.2.3.4`)",
+            "AAAA":  "IPv6 address",
+            "CNAME": "target hostname (e.g. `myapp.vercel.app`)",
+            "TXT":   "text value",
+            "MX":    "mail server hostname",
+        }.get(rtype, "value")
+        await update.message.reply_text(
+            f"Subdomain: *{name}.{cf_domain}*\n\nEnter {hint}:\n\n/cancel to go back",
+            parse_mode="Markdown")
+        return
+
+    if action == "dns_value":
+        rtype = context.user_data.get("dns_rtype", "A")
+        context.user_data.update(dns_value=text, action=None)
+        if rtype in dns.NO_PROXY_TYPES:
+            name    = context.user_data.get("dns_name", "")
+            proxied = False
+            result  = dns.create_record(rtype, name, text, proxied)
+            if result.get("success"):
+                rec = result["result"]
+                rid = rec["id"]
+                msg = (
+                    f"✅ *Record Created*\n\n"
+                    f"`{rec['name']}`\n"
+                    f"Type: `{rtype}` · ⚪ DNS only\n"
+                    f"Value: `{text}`"
+                )
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🗑 Delete this record", callback_data=f"del_dns_{rid}")],
+                    [InlineKeyboardButton("🔙 DNS",               callback_data="dns_menu")],
+                ])
+            else:
+                errors = result.get("errors", [])
+                msg    = f"❌ Failed: {errors[0].get('message') if errors else 'Unknown error'}"
+                kb     = kb_dns()
+            context.user_data.clear()
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb)
+        else:
+            await update.message.reply_text(
+                "Proxy through Cloudflare?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🟠 Proxied (CDN)", callback_data="dnsproxy_yes"),
+                     InlineKeyboardButton("⚪ DNS only",      callback_data="dnsproxy_no")],
+                    [InlineKeyboardButton("❌ Cancel",         callback_data="dns_menu")],
+                ]))
+        return
+
+    # ── existing text input steps ──────────────────────────────────────────────
+
+    if action == "add_user":
+        parts = text.split()
+        username, days, temporary, password, max_logins = parts[0], None, False, None, None
+        rest = []
+        for p in parts[1:]:
+            if p.startswith("pwd:"):    password = p[4:]
+            elif p.startswith("limit:"):
+                try:
+                    max_logins = int(p[6:])
+                    if max_logins <= 0: raise ValueError
+                except ValueError:
+                    await update.message.reply_text("❌ Invalid limit", reply_markup=kb_menu()); return
+            else: rest.append(p)
+        if rest:
+            try: days = int(rest[0])
+            except ValueError:
+                if rest[0].lower() in ("temp", "temporary", "t"): temporary = True
+                else:
+                    await update.message.reply_text(
+                        "❌ Invalid format\n\nExamples:\n`user` `user 30` `user pwd:pass` `user 7 temp` `user limit:2`",
+                        parse_mode="Markdown", reply_markup=kb_menu()); return
+        if len(rest) >= 2 and rest[1].lower() in ("temp", "temporary", "t"):
+            temporary = True
+
+        ok, pwd, expires, linux_ok, err = core.add_user(username, password, days, temporary, max_logins)
+        if ok:
+            exp_text = expires[:10] if expires else "Never"
+            msg = f"✅ *{'Temp' if temporary else 'User'} Added*\n\n`{username}` • `{pwd}`\nExpires: {exp_text}"
+            if max_logins: msg += f"\nMax Logins: {max_logins}"
+            if not linux_ok: msg += "\n\n⚠️ Linux user creation failed"
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb_menu())
+        else:
+            await update.message.reply_text(
+                "❌ Password already in use" if err == "password_exists" else "❌ Username exists",
+                reply_markup=kb_menu())
+        context.user_data.clear()
+
+    elif action == "set_maxlogins":
+        try:
+            username = context.user_data.get("maxlogins_username")
+            if not username: raise ValueError("❌ Session expired")
+            n = int(text)
+            if n < 0: raise ValueError("❌ Invalid number")
+            limit = None if n == 0 else n
+            context.user_data.clear()
+            if core.set_maxlogins(username, limit):
+                user  = core.get_user(username)
+                label = "♾️ Unlimited" if limit is None else f"🔒 {limit} max"
+                if user:
+                    await update.message.reply_text(
+                        fmt_user(user) + f"\n\n✅ Max logins → {label}", parse_mode="Markdown",
+                        reply_markup=kb_user_actions(username, user["temporary"], user["status"] == "Active"))
+                else:
+                    await update.message.reply_text("❌ User not found", reply_markup=kb_users())
+            else:
+                await update.message.reply_text("❌ Failed", reply_markup=kb_users())
+        except (ValueError, TypeError) as e:
+            await update.message.reply_text(str(e) if str(e).startswith("❌") else "❌ Send a number (0 to remove)", reply_markup=kb_users())
+            context.user_data.clear()
+
+    elif action == "change_password_custom":
+        username = context.user_data.get("change_password_username")
+        ok, old, err = core.change_password(username, text)
+        if ok:
+            await update.message.reply_text(f"✅ *Password Changed*\n\n`{username}`\n`{old}` → `{text}`",
+                                             parse_mode="Markdown", reply_markup=kb_users())
+        else:
+            await update.message.reply_text(
+                "❌ Password already in use" if err == "password_exists" else "❌ User not found",
+                reply_markup=kb_users())
+        context.user_data.clear()
+
+    elif action in ("modify_expiry_set", "modify_expiry_extend"):
+        try:
+            username = context.user_data.get("modify_expiry_username")
+            if not username: raise ValueError("❌ Session expired")
+            days = parse_positive_int(text)
+            ok, new_exp = core.modify_expiry(username, days, extend=(action == "modify_expiry_extend"))
+            if ok:
+                prefix = f"Extended +{days}d" if action == "modify_expiry_extend" else "Expiry Set"
+                await update.message.reply_text(f"✅ *{prefix}*\n\n`{username}`\n{new_exp[:10]}",
+                                                 parse_mode="Markdown", reply_markup=kb_users())
+            else:
+                await update.message.reply_text("❌ Failed", reply_markup=kb_users())
+        except ValueError as e:
+            await update.message.reply_text(str(e), reply_markup=kb_users())
+        finally:
+            context.user_data.clear()
+
+
+async def on_error(update, context):
+    logger.error(f"Update {update} caused error {context.error}")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    if not TOKEN:
+        print("❌ TOKEN not set"); return
+
+    core.init_db()
+    r = core.sync()
+    logger.info(f"Started. {r['deleted_count']} expired users cleaned.")
+
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start",  cmd_start))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, on_message))
+    app.add_error_handler(on_error)
+
+    for k, v in [("Domain", DOMAIN), ("DNSTT", DNSTT), ("Key", KEY)]:
+        if v: logger.info(f"{k}: {v}")
+
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()

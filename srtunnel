@@ -1,0 +1,111 @@
+#!/root/srtunnel/venv/bin/python
+import os, time, subprocess, curses
+from pathlib import Path
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedSeq
+from helpers.services import watcher
+
+BASE_DIR, API_URL = Path(__file__).resolve().parent, "http://127.0.0.1:51700"
+CONFIG_FILE = BASE_DIR / "config.yaml"
+yaml_rt = YAML()
+yaml_rt.preserve_quotes, yaml_rt.width, yaml_rt.explicit_start = True, 4096, False
+
+def load_conf(): return yaml_rt.load(CONFIG_FILE) if CONFIG_FILE.exists() else {}
+
+def update_config_status(name, new_status):
+    conf = load_conf()
+    mgr = conf.setdefault("manager", {})
+    for key in ["keep", "enable"]:
+        lst = [x for x in mgr.get(key, []) if x != name]
+        if key == new_status: lst.append(name)
+        seq = CommentedSeq(lst)
+        seq.fa.set_flow_style()
+        mgr[key] = seq
+    yaml_rt.dump(conf, CONFIG_FILE)
+
+def check_api():
+    try:
+        import urllib.request
+        return urllib.request.urlopen(f"{API_URL}/api/health", timeout=1).status == 200
+    except: return False
+
+class Manager:
+    def __init__(self):
+        self.selected = self.scroll = 0
+        self.msg, self.services = ("", 0), []
+        self.refresh()
+
+    def refresh(self):
+        self.api_online = check_api()
+        raw = watcher.list_services(lines=0) or []
+        mgr_svcs = load_conf().get("manager", {}).get("services", {})
+        self.services = []
+        for s in raw:
+            cmd = mgr_svcs.get(s['name'], "N/A")
+            s["command"] = cmd.get("command", "N/A") if isinstance(cmd, dict) else cmd
+            self.services.append(s)
+        self.selected = min(self.selected, max(0, len(self.services)-1))
+
+    def draw(self, stdscr):
+        h, w = stdscr.getmaxyx()
+        stdscr.erase()
+        stdscr.addstr(0, 1, " SRTUNNEL ", curses.A_BOLD)
+        stdscr.addstr(0, w-10, " ● API ", curses.color_pair(1 if self.api_online else 2))
+        stdscr.attron(curses.A_DIM)
+        stdscr.hline(1, 0, curses.ACS_HLINE, w)
+        stdscr.addstr(3, 0, f"  {'STATE':<7} {'MODE':<5} {'NAME':<15} COMMAND"[:w-1])
+        stdscr.hline(h-3, 0, curses.ACS_HLINE, w)
+        stdscr.attroff(curses.A_DIM)
+
+        if time.time() - self.msg[1] < 2:
+            stdscr.addstr(2, 2, f"» {self.msg[0]}", curses.A_BOLD)
+
+        for i, s in enumerate(self.services[self.scroll:self.scroll+(h-7)]):
+            idx, style = self.scroll + i, curses.A_NORMAL
+            if idx == self.selected: style = curses.A_REVERSE
+            elif s.get("running"): style = curses.color_pair(1)
+            
+            run_txt = 'RUN' if s.get('running') else 'OFF'
+            mode_txt = {"keep":"[K]", "enable":"[E]"}.get(s.get("status"), "[ ]")
+            line = f"  {run_txt:<7} {mode_txt:<5} {s['name']:<15} {s['command']}"
+            try: stdscr.addstr(4 + i, 0, line[:w-1], style)
+            except: pass
+
+        stdscr.addstr(h-2, 2, " [SPACE] Toggle  [S] Mode  [ENTER] Attach  [Q] Quit", curses.A_DIM)
+
+    def run(self, stdscr):
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_GREEN, -1)
+        curses.init_pair(2, curses.COLOR_RED, -1)
+        stdscr.timeout(2000)
+        while True:
+            self.draw(stdscr)
+            c = stdscr.getch()
+            if c == ord('q'): break
+            if c == curses.KEY_UP: self.selected = max(0, self.selected - 1)
+            elif c == curses.KEY_DOWN: self.selected = min(len(self.services)-1, self.selected + 1)
+            
+            if self.selected < self.scroll: self.scroll = self.selected
+            elif self.selected >= self.scroll + (stdscr.getmaxyx()[0]-7): self.scroll = self.selected - (stdscr.getmaxyx()[0]-8)
+            
+            if self.selected < len(self.services):
+                s = self.services[self.selected]
+                if c == ord(' '):
+                    fn = watcher.stop_service if s.get("running") else watcher.start_service
+                    self.msg = (fn(s['name'])[1], time.time())
+                    self.refresh()
+                elif c == ord('s'):
+                    m = ["disable", "enable", "keep"]
+                    nxt = m[(m.index(s.get("status", "disable")) + 1) % 3]
+                    watcher.set_status(s['name'], nxt)
+                    update_config_status(s['name'], nxt)
+                    self.refresh()
+                elif c in [10, 13] and s.get("running"):
+                    curses.endwin()
+                    cmd = ["tmux", "switch-client", "-t", s['name']] if os.getenv("TMUX") else ["tmux", "attach", "-t", s['name']]
+                    subprocess.run(cmd)
+                    stdscr.refresh()
+            if c == -1: self.refresh()
+
+if __name__ == "__main__":
+    curses.wrapper(Manager().run)

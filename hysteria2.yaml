@@ -1,0 +1,25 @@
+listen: :5668
+auth:
+  type: password
+  password: "passpass123"
+tls:
+  cert: /root/srtunnel/server.crt
+  key: /root/srtunnel/server.key
+  sniGuard: disable
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.cloudflare.com
+    rewriteHost: true
+bandwidth:
+  up: 1 gbps
+  down: 1 gbps
+ignoreClientBandwidth: false
+udpIdleTimeout: 60s
+resolver:
+  type: system
+
+
+
+
+

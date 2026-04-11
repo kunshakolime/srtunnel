@@ -1,0 +1,280 @@
+import sqlite3, datetime, random, string, os, shutil
+from contextlib import contextmanager
+from pathlib import Path
+
+from helpers import system, zivpn
+
+# ── Config (set once by the host app) ────────────────────────────────────────
+
+cfg = {}
+
+def init(config: dict):
+    """Call this once at startup with the loaded config dict."""
+    cfg.update(config)
+
+def _c(key, default=None):
+    return cfg.get(key, default)
+
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+@contextmanager
+def db_conn(commit=True):
+    conn = sqlite3.connect(_c("DB_FILE", "users.db"))
+    try:
+        yield conn.cursor()
+        if commit:
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db():
+    with db_conn() as c:
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            username    TEXT UNIQUE,
+            password    TEXT UNIQUE,
+            created_at  TEXT,
+            expires_at  TEXT,
+            temporary   INTEGER DEFAULT 0,
+            max_logins  INTEGER DEFAULT NULL
+        )''')
+
+
+# ── Sync ──────────────────────────────────────────────────────────────────────
+
+def sync():
+    """Expire temp users, reconcile Linux accounts, push passwords to zivpn."""
+    now = datetime.datetime.now().isoformat()
+
+    with db_conn() as c:
+        c.execute("SELECT username FROM users WHERE temporary=1 AND expires_at IS NOT NULL AND expires_at < ?", (now,))
+        expired_temp = [r[0] for r in c.fetchall()]
+        c.execute("DELETE FROM users WHERE temporary=1 AND expires_at IS NOT NULL AND expires_at < ?", (now,))
+        deleted = c.rowcount
+
+        c.execute("SELECT username FROM users WHERE expires_at IS NOT NULL AND expires_at < ?", (now,))
+        all_expired = [r[0] for r in c.fetchall()]
+
+        c.execute("SELECT username, password, max_logins FROM users WHERE expires_at IS NULL OR expires_at > ?", (now,))
+        active = {u: {"password": p, "max_logins": m} for u, p, m in c.fetchall()}
+
+    for u in expired_temp:
+        system.delete_user(u)
+    for u in all_expired:
+        if system.user_exists(u):
+            system.delete_user(u)
+    for u, d in active.items():
+        if not system.user_exists(u):
+            system.create_user(u, d["password"], d["max_logins"])
+        elif d["max_logins"]:
+            system.set_maxlogins(u, d["max_logins"])
+
+    passwords = [d["password"] for d in active.values()]
+    ok = zivpn.set_passwords(_c("CONFIG_FILE", "./zivpn.json"), passwords, _c("DEFAULT_PASSWORD", "123"))
+    return {"success": ok, "deleted_count": deleted}
+
+
+def _auto_sync(fn):
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        sync()
+        return result
+    return wrapper
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def gen_password(length=5):
+    chars = string.ascii_letters + string.digits
+    with db_conn(commit=False) as c:
+        while True:
+            pwd = "".join(random.choice(chars) for _ in range(length))
+            c.execute("SELECT 1 FROM users WHERE password=?", (pwd,))
+            if not c.fetchone():
+                return pwd
+
+
+# ── User CRUD ─────────────────────────────────────────────────────────────────
+
+@_auto_sync
+def add_user(username, password=None, days=None, temporary=False, max_logins=None):
+    created = datetime.datetime.now()
+    expires = (created + datetime.timedelta(days=days)).isoformat() if days else None
+    with db_conn(commit=False) as c:
+        if password is None:
+            password = gen_password()
+        else:
+            c.execute("SELECT 1 FROM users WHERE password=?", (password,))
+            if c.fetchone():
+                return False, None, None, False, "password_exists"
+        try:
+            c.execute(
+                "INSERT INTO users (username, password, created_at, expires_at, temporary, max_logins) VALUES (?,?,?,?,?,?)",
+                (username, password, created.isoformat(), expires, int(temporary), max_logins),
+            )
+            c.connection.commit()
+            return True, password, expires, system.create_user(username, password, max_logins), None
+        except sqlite3.IntegrityError:
+            return False, None, None, False, "username_exists"
+
+
+@_auto_sync
+def delete_user(username):
+    with db_conn(commit=False) as c:
+        c.execute("DELETE FROM users WHERE username=?", (username,))
+        ok = c.rowcount > 0
+        c.connection.commit()
+    if ok:
+        system.delete_user(username)
+    return ok
+
+
+def get_users(filter_status=None):
+    with db_conn(commit=False) as c:
+        c.execute("SELECT username, password, created_at, expires_at, temporary, max_logins FROM users ORDER BY created_at DESC")
+        rows = c.fetchall()
+    now = datetime.datetime.now()
+    result = []
+    for username, password, created, expires, temporary, max_logins in rows:
+        status = "Active" if not expires or datetime.datetime.fromisoformat(expires) > now else "Expired"
+        if filter_status and status != filter_status:
+            continue
+        result.append(dict(username=username, password=password, created=created,
+                           expires=expires, temporary=bool(temporary), max_logins=max_logins, status=status))
+    return result
+
+
+def get_user(username):
+    with db_conn(commit=False) as c:
+        c.execute("SELECT username, password, created_at, expires_at, temporary, max_logins FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+    if not row:
+        return None
+    username, password, created, expires, temporary, max_logins = row
+    status = "Active" if not expires or datetime.datetime.fromisoformat(expires) > datetime.datetime.now() else "Expired"
+    return dict(username=username, password=password, created=created,
+                expires=expires, temporary=bool(temporary), max_logins=max_logins, status=status)
+
+
+@_auto_sync
+def change_password(username, new_password=None):
+    with db_conn(commit=False) as c:
+        c.execute("SELECT password FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+        if not row:
+            return False, None, None
+        if new_password is None:
+            new_password = gen_password()
+        else:
+            c.execute("SELECT 1 FROM users WHERE password=? AND username!=?", (new_password, username))
+            if c.fetchone():
+                return False, None, "password_exists"
+        old = row[0]
+        c.execute("UPDATE users SET password=? WHERE username=?", (new_password, username))
+        c.connection.commit()
+    system.update_password(username, new_password)
+    return True, old, new_password
+
+
+@_auto_sync
+def set_expiry(username, expires_at):
+    with db_conn(commit=False) as c:
+        c.execute("UPDATE users SET expires_at=? WHERE username=?", (expires_at, username))
+        ok = c.rowcount > 0
+        c.connection.commit()
+    return ok
+
+
+@_auto_sync
+def modify_expiry(username, days, extend=False):
+    with db_conn(commit=False) as c:
+        if extend:
+            c.execute("SELECT expires_at FROM users WHERE username=?", (username,))
+            row = c.fetchone()
+            if not row:
+                return False, None
+            base = datetime.datetime.fromisoformat(row[0]) if row[0] else datetime.datetime.now()
+        else:
+            base = datetime.datetime.now()
+        new_exp = (base + datetime.timedelta(days=days)).isoformat()
+        c.execute("UPDATE users SET expires_at=? WHERE username=?", (new_exp, username))
+        ok = c.rowcount > 0
+        c.connection.commit()
+    return (True, new_exp) if ok else (False, None)
+
+
+@_auto_sync
+def set_active(username, active):
+    expires = None if active else (datetime.datetime.now() - datetime.timedelta(days=1)).isoformat()
+    return set_expiry(username, expires)
+
+
+@_auto_sync
+def toggle_temporary(username):
+    with db_conn(commit=False) as c:
+        c.execute("SELECT temporary, expires_at FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+        if not row:
+            return False
+        cur_temp, expires = row
+        new_temp = 0 if cur_temp else 1
+        if new_temp == 1 and expires:
+            try:
+                if datetime.datetime.fromisoformat(expires) < datetime.datetime.now():
+                    new_exp = (datetime.datetime.now() + datetime.timedelta(days=1)).isoformat()
+                    c.execute("UPDATE users SET temporary=?, expires_at=? WHERE username=?", (new_temp, new_exp, username))
+                    c.connection.commit()
+                    return True
+            except Exception:
+                pass
+        c.execute("UPDATE users SET temporary=? WHERE username=?", (new_temp, username))
+        c.connection.commit()
+    return True
+
+
+@_auto_sync
+def set_maxlogins(username, limit=None):
+    if limit is not None and limit <= 0:
+        return False
+    with db_conn(commit=False) as c:
+        c.execute("UPDATE users SET max_logins=? WHERE username=?", (limit, username))
+        ok = c.rowcount > 0
+        c.connection.commit()
+    if ok:
+        system.set_maxlogins(username, limit)
+    return ok
+
+
+def sync_db(external_path):
+    """Merge an external users.db into the active one, then re-sync."""
+    if not os.path.exists(external_path):
+        return False
+    ext = sqlite3.connect(external_path)
+    try:
+        cur = ext.cursor()
+        cur.execute("PRAGMA table_info(users)")
+        cols = [c[1] for c in cur.fetchall()]
+        has_max = "max_logins" in cols
+        fields = "username, password, created_at, expires_at, temporary" + (", max_logins" if has_max else "")
+        cur.execute(f"SELECT {fields} FROM users")
+        rows = cur.fetchall()
+    except Exception:
+        return False
+    finally:
+        ext.close()
+
+    with db_conn() as c:
+        for row in rows:
+            u, p, ca, ea, tmp = row[:5]
+            ml = row[5] if has_max else None
+            c.execute("SELECT 1 FROM users WHERE username=?", (u,))
+            if c.fetchone():
+                c.execute("UPDATE users SET password=?,created_at=?,expires_at=?,temporary=?,max_logins=? WHERE username=?",
+                          (p, ca, ea, tmp, ml, u))
+            else:
+                c.execute("INSERT INTO users (username,password,created_at,expires_at,temporary,max_logins) VALUES (?,?,?,?,?,?)",
+                          (u, p, ca, ea, tmp, ml))
+    sync()
+    return True

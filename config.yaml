@@ -1,0 +1,108 @@
+manager:
+  launch_commands:
+  - echo \"Manager started at $(date)\" >> hello.txt
+  - sysctl -w net.core.rmem_max=16777216
+  - sysctl -w net.core.wmem_max=16777216
+  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${UC_PR} -j DNAT --to-destination :36712 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${UC_PR} -j DNAT --to-destination :36712
+  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${ZU_PR} -j DNAT --to-destination :5667 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${ZU_PR} -j DNAT --to-destination :5667
+  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${H2_PR} -j DNAT --to-destination :5668 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${H2_PR} -j DNAT --to-destination :5668
+  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${H1_PR} -j DNAT --to-destination :5669 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${H1_PR} -j DNAT --to-destination :5669
+  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053
+  - echo "starting..."
+  - sleep 3
+  keep: [telegram_bot, websocket, dropbear, badvpn, zivpn, udp-custom, hysteria1, slowdns]
+  enable: [udp-rules]
+  services:
+    srapi: ./srapi.py
+    telegram_bot: ./telegram_bot
+    pystunnel: ./pystunnel.py config.yaml
+    websocket: ./websocket
+    dropbear: dropbear -EFR -p 127.0.0.1:23 -W 65536 -b /root/srtunnel/bannerssh
+    badvpn: ./badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 1000 --client-socket-sndbuf 0 --udp-mtu 9000
+    zivpn: ./udp-zivpn server -c zivpn.json
+    udp-custom: ./udp-custom -c udp-custom.json
+    hysteria1: ./hysteria1 server --config hysteria1.json
+    hysteria2: ./hysteria2 server --config hysteria2.yaml
+    slowdns: ./dnstt-server -udp :8053 -privkey-file slowdns.key ${SLOWDNSDOMAIN} 127.0.0.1:${SSH}
+    udp-rules: iptables -t nat -D PREROUTING -i ${IFACE} -p udp --dport 1:65535 -j DNAT --to-destination :36712
+    xray: /usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+telegram_bot:
+  db_file: "users.db"
+  config_file: "./zivpn.json"
+  default_password: "123"
+  token: "${TOKEN}"
+  admin_ids:
+    - ${ID}
+  domain: "${DOMAIN}"
+  cf_root_domain: "example.com"   # ← root domain for DNS management
+  cf_token: "..."
+  cf_zone:  "..."
+  dnstt: "${SLOWDNSDOMAIN}"
+  slowdnskey: "./slowdns.pub"
+  interface: "${IFACE}"
+  bandwidth_down: "${MY_SPEED}"
+  bandwidth_up: "${MY_SPEED}"
+websocket:
+  # WebSocket Tunnel Server Configuration
+  ports: # Port Configuration
+    http: [80, 8080, 8000, 8880]      # HTTP ports (plain text)
+    https: [8443]                      # HTTPS ports (SSL/TLS)
+    enable_ssl: true                   # Enable HTTPS servers
+  backend: # Backend Server (SSH, telnet, etc.)
+    host: "127.0.0.1"
+    port: ${SSH}
+    max_retries: 3
+    retry_delay: 0.5
+  ssl:
+    cert_file: "./server.crt"
+    key_file: "./server.key"
+    min_tls_version: "1.2"
+  server:
+    bind_address: "0.0.0.0"
+    max_connections: 1000
+    buffer_size: 8192
+  timeouts:
+    initial: 3
+    split: 2
+    connection: 60
+  http:
+    response_mode: "auto"
+    handle_split: true
+    custom_response_text: ""
+  performance:
+    enable_nodelay: true
+    enable_keepalive: true
+    keepalive_idle: 60
+    keepalive_interval: 10
+    keepalive_count: 3
+  logging:
+    level: "INFO"
+    file: "./websocket.log"
+    format: "detailed"
+  monitoring:
+    stats_interval: 60
+    log_connections: true
+    show_bytes_human: true
+  errors:
+    ignore_early_reset: true
+stunnel:
+  certfile: server.crt
+  keyfile: server.key
+  log_level: INFO
+  listeners:
+    - name: https-main
+      listen: 0.0.0.0:443
+      default_backend:
+        - 127.0.0.1:${SSH}
+      sni:
+        example.com:
+          - 127.0.0.1:8081
+          - 127.0.0.1:8082
+        api.example.com:
+          - 127.0.0.1:22
+    - name: alt-port
+      listen: 0.0.0.0:8443
+      default_backend:
+        - 127.0.0.1:7000
+
+
