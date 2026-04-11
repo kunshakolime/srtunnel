@@ -5,6 +5,7 @@ sys.path.insert(0, "/root/srtunnel")
 
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -16,23 +17,6 @@ from helpers import services as svc_helper
 import yaml, secrets, logging
 
 logger = logging.getLogger("srapi")
-
-def run_launch_commands():
-    """Run manager.launch_commands from config.yaml once at startup."""
-    path = Path("/root/srtunnel/config.yaml")
-    if not path.exists():
-        return
-    block = (yaml.safe_load(path.read_text()) or {}).get("manager", {})
-    for cmd in (block.get("launch_commands") or []):
-        try:
-            subprocess.run(cmd, shell=True, check=True)
-            logger.info("launch_command ok: %s", cmd)
-        except subprocess.CalledProcessError as e:
-            logger.warning("launch_command failed: %s — %s", cmd, e)
-
-@app.on_event("startup")
-def on_startup():
-    run_launch_commands()
 
 def load_config():
     path = Path("/root/srtunnel/config.yaml")
@@ -55,7 +39,25 @@ def load_config():
 cfg = load_config()
  
 
-app = FastAPI()
+def run_launch_commands():
+    """Run manager.launch_commands from config.yaml once at startup."""
+    path = Path("/root/srtunnel/config.yaml")
+    if not path.exists():
+        return
+    block = (yaml.safe_load(path.read_text()) or {}).get("manager", {})
+    for cmd in (block.get("launch_commands") or []):
+        try:
+            subprocess.run(cmd, shell=True, check=True)
+            logger.info("launch_command ok: %s", cmd)
+        except subprocess.CalledProcessError as e:
+            logger.warning("launch_command failed: %s — %s", cmd, e)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    run_launch_commands()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 core.init(cfg)
 dns.init(cfg) 
