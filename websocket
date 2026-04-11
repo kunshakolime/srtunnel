@@ -1,0 +1,656 @@
+#!/root/srtunnel/venv/bin/python
+"""
+WebSocket Tunnel Server
+Tunnels WebSocket/HTTP traffic to a backend service (SSH, etc.)
+"""
+
+BANNER = """
+╔══════════════════════════════════════════════════════════════╗
+║           WebSocket Tunnel Server by kunshakolime            ║
+║                    Version 3.1 - High Concurrency            ║
+╚══════════════════════════════════════════════════════════════╝"""
+
+import sys
+import select
+import signal
+import threading
+import argparse
+import logging
+import yaml
+import socket
+import ssl
+import time
+import hashlib
+import base64
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Optional, Dict, Any
+from logging.handlers import RotatingFileHandler
+
+# CONFIG
+class Config:
+
+    def __init__(self, config_file: str = 'config.yaml'):
+        self.config_file = config_file
+        self.data = self._load_config()
+        self._cache()
+
+    def _load_config(self) -> Dict[str, Any]:
+        config_path = Path(self.config_file)
+        if not config_path.exists():
+            logging.error(f"Config file not found: {self.config_file}")
+            time.sleep(5)
+            sys.exit(1)
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                raw = yaml.safe_load(f) or {}
+            data = raw.get("websocket")
+            if not data:
+                logging.error(f"{self.config_file} missing 'websocket' block.")
+                time.sleep(5)
+                sys.exit(1)
+        except Exception as e:
+            logging.error(f"Failed to read {self.config_file}: {e}")
+            time.sleep(5)
+            sys.exit(1)
+        return data
+
+    def _cache(self):
+        self.buffer_size        = self.get('server',      'buffer_size',          default=65536)
+        self.max_connections    = self.get('server',      'max_connections')
+        self.bind_address       = self.get('server',      'bind_address')
+        self.backend_host       = self.get('backend',     'host')
+        self.backend_port       = self.get('backend',     'port')
+        self.backend_retries    = self.get('backend',     'max_retries')
+        self.backend_delay      = self.get('backend',     'retry_delay')
+        self.timeout_initial    = self.get('timeouts',    'initial')
+        self.timeout_conn       = self.get('timeouts',    'connection')
+        self.timeout_split      = self.get('timeouts',    'split')
+        self.timeout_idle       = self.get('timeouts',    'max_idle',             default=300)
+        self.response_mode      = self.get('http',        'response_mode')
+        self.response_text      = self.get('http',        'custom_response_text', default='')
+        self.handle_split       = self.get('http',        'handle_split')
+        self.enable_nodelay     = self.get('performance', 'enable_nodelay')
+        self.enable_keepalive   = self.get('performance', 'enable_keepalive')
+        self.keepalive_idle     = self.get('performance', 'keepalive_idle')
+        self.keepalive_intvl    = self.get('performance', 'keepalive_interval')
+        self.keepalive_count    = self.get('performance', 'keepalive_count')
+        self.log_connections    = self.get('monitoring',  'log_connections')
+        self.show_bytes_human   = self.get('monitoring',  'show_bytes_human',     default=True)
+        self.stats_interval     = self.get('monitoring',  'stats_interval')
+        self.ignore_early_reset = self.get('errors',      'ignore_early_reset')
+
+        # Enforce minimum buffer size to cover max TLS record (16KB + header).
+        # Smaller values cause "illegal packet size" errors on SSL connections
+        # because a single TLS record can't be read in one recv() call.
+        # Warning is deferred to after setup_logging() so it uses the right formatter.
+        self._buffer_warning = None
+        if self.buffer_size < 16385:
+            self._buffer_warning = (
+                f"buffer_size {self.buffer_size} is below TLS minimum (16385). "
+                "Raising to 65536 to prevent SSL packet-size errors."
+            )
+            self.buffer_size = 65536
+
+    def get(self, *keys, default=None):
+        value = self.data
+        for key in keys:
+            if not isinstance(value, dict) or key not in value:
+                return default
+            value = value[key]
+        return value
+
+    def setup_logging(self):
+        log_level = getattr(logging, self.get('logging', 'level', default='INFO').upper())
+        log_file  = self.get('logging', 'file')
+        fmt       = ('%(levelname)s: %(message)s' if self.get('logging', 'format') == 'simple'
+                     else '%(asctime)s [%(levelname)s] %(message)s')
+        handlers  = [logging.StreamHandler(sys.stdout)]
+        if log_file:
+            try:
+                Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        
+                handlers.append(
+                    RotatingFileHandler(
+                        log_file,
+                        maxBytes=1 * 1024 * 1024,  # ✅ 1 MB limit
+                        backupCount=3,             # keep 3 old files
+                        encoding='utf-8'
+                    )
+                )
+            except Exception as e:
+                print(f"Warning: Could not create log file: {e}")
+        for h in handlers:
+            h.setFormatter(logging.Formatter(fmt))
+        logging.basicConfig(level=log_level, handlers=handlers, force=True)
+        if self._buffer_warning:
+            logging.warning(self._buffer_warning)
+            self._buffer_warning = None
+
+
+def normalize_ports(ports) -> list:
+    return list(ports) if isinstance(ports, (list, tuple)) else [ports]
+
+# UTILITIES
+def format_bytes(n: int, human: bool = True) -> str:
+    if not human or n < 1024:    return f"{n}B"
+    if n < 1024**2:              return f"{n / 1024:.2f}KB"
+    if n < 1024**3:              return f"{n / 1024**2:.2f}MB"
+    return                              f"{n / 1024**3:.2f}GB"
+
+def format_duration(s: float) -> str:
+    h, rem = divmod(int(s), 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}h{m}m" if h else f"{m}m{sec}s" if m else f"{sec}s"
+
+# HTTP/WEBSOCKET HANDSHAKE
+class Handshake:
+    """Parses an HTTP/WebSocket request and builds the appropriate response."""
+
+    def __init__(self, data: bytes):
+        self.method      = ''
+        self.path        = '/'
+        self.headers: Dict[str, str] = {}
+        self.is_valid    = False
+        self.is_websocket = False
+        self._parse(data)
+
+    def _parse(self, data: bytes):
+        try:
+            lines = data.decode('utf-8', errors='ignore').split('\n')
+            if not lines or not lines[0].strip():
+                return
+            parts = lines[0].strip().split()
+            self.method = parts[0].upper()
+            if self.method.startswith('SSH-'):
+                return
+            self.path = parts[1] if len(parts) > 1 else '/'
+            for line in lines[1:]:
+                line = line.strip()
+                if ':' in line:
+                    k, v = line.split(':', 1)
+                    key = k.strip().lower()
+                    if key not in self.headers:
+                        self.headers[key] = v.strip()
+            self.is_websocket = (
+                'websocket' in self.headers.get('upgrade',    '').lower() and
+                'upgrade'   in self.headers.get('connection', '').lower()
+            )
+            self.is_valid = True
+        except Exception:
+            pass
+
+    def build_response(self, mode: str, custom_text: str) -> Optional[bytes]:
+        if not self.is_valid:
+            return None
+        logging.info(f"  {self.method} {self.path}{' [WS]' if self.is_websocket else ''}")
+
+        if mode == 'auto':
+            mode = '101' if self.is_websocket else '200'
+
+        match mode:
+            case '101':
+                resp = f"HTTP/1.1 101 {custom_text or 'Switching Protocols'}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n".encode()
+                if 'sec-websocket-key' in self.headers:
+                    key    = self.headers['sec-websocket-key'] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+                    accept = base64.b64encode(hashlib.sha1(key.encode()).digest()).decode()
+                    resp  += f"Sec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Version: 13\r\n".encode()
+            case '100':
+                return f"HTTP/1.1 100 {custom_text or 'Continue'}\r\n\r\n".encode()
+            case _:
+                resp = f"HTTP/1.1 200 {custom_text or 'OK'}\r\nConnection: Upgrade\r\n".encode()
+
+        resp += f"Server: nginx/1.20.2\r\nDate: {time.strftime('%a, %d %b %Y %H:%M:%S GMT', time.gmtime())}\r\n\r\n".encode()
+        return resp
+
+
+# SERVER
+class TunnelServer:
+
+    def __init__(self, port: int, use_ssl: bool, config: Config):
+        self.port       = port
+        self.use_ssl    = use_ssl
+        self.config     = config
+        self.running    = False
+        self.server     = None
+        self._stopped   = False
+
+        # --- Counters ---
+        # Simple integer fields. In CPython, integer += is effectively atomic
+        # under the GIL, so we skip locking on the hot-path increments.
+        # The stat_lock is only acquired when reading a consistent snapshot
+        # for display (stats logger / stop summary).
+        self._active_connections   = 0
+        self._total_connections    = 0
+        self._total_bytes_sent     = 0
+        self._total_bytes_received = 0
+        self._stat_lock            = threading.Lock()
+
+        # --- IP rate-limit tables ---
+        self.ip_last_seen: Dict[str, float] = {}
+        self.ip_blacklist: Dict[str, float] = {}
+        self._ip_lock = threading.Lock()  # separate, narrower lock
+
+        self.start_time = None
+
+        # --- Thread pool replaces per-connection thread creation ---
+        # max_workers caps total active handler threads. Falls back gracefully
+        # if max_connections is not set in config.
+        # Shrink thread stack from Linux default (8MB) to 512KB — at 1000
+        # concurrent connections that cuts stack memory from ~8GB to ~500MB.
+        threading.stack_size(512 * 1024)
+        max_workers = config.max_connections or 500
+        self.executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix=f"tunnel-{port}"
+        )
+
+        self.ssl_context = None
+        if use_ssl:
+            self._setup_ssl()
+
+    def _setup_ssl(self):
+        try:
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ssl_context.load_cert_chain(
+                certfile=self.config.get('ssl', 'cert_file'),
+                keyfile=self.config.get('ssl',  'key_file')
+            )
+            self.ssl_context.minimum_version = {
+                '1.0': ssl.TLSVersion.TLSv1,
+                '1.1': ssl.TLSVersion.TLSv1_1,
+                '1.2': ssl.TLSVersion.TLSv1_2,
+                '1.3': ssl.TLSVersion.TLSv1_3,
+            }.get(self.config.get('ssl', 'min_tls_version', default='1.2'), ssl.TLSVersion.TLSv1_2)
+        except FileNotFoundError as e:
+            logging.error(f"SSL cert/key not found: {e}")
+            raise
+        except Exception as e:
+            logging.error(f"SSL setup error: {e}")
+            raise
+
+    def reset(self):
+        """Reset socket/state flags for a clean restart, preserving lifetime stats."""
+        self._stopped = False
+        self.running  = False
+        self.server   = None
+
+    def start(self):
+        try:
+            self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            # SO_REUSEPORT lets the kernel load-balance accept() calls across
+            # threads/processes on the same port, reducing contention at scale.
+            if hasattr(socket, 'SO_REUSEPORT'):
+                try:
+                    self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except OSError:
+                    pass  # not supported on all kernels — safe to skip
+
+            if self.config.enable_keepalive:
+                self.server.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                for attr, val in [
+                    ('TCP_KEEPIDLE',  self.config.keepalive_idle),
+                    ('TCP_KEEPINTVL', self.config.keepalive_intvl),
+                    ('TCP_KEEPCNT',   self.config.keepalive_count),
+                ]:
+                    if hasattr(socket, attr):
+                        self.server.setsockopt(socket.IPPROTO_TCP, getattr(socket, attr), val)
+
+            self.server.bind((self.config.bind_address, self.port))
+            self.server.listen(self.config.max_connections)
+
+            logging.info(f"> {'HTTPS' if self.use_ssl else 'HTTP'} server listening on {self.config.bind_address}:{self.port}")
+
+            self.running    = True
+            self.start_time = self.start_time or time.time()
+
+            if self.config.stats_interval and self.config.stats_interval > 0:
+                threading.Thread(target=self._stats_logger, daemon=True).start()
+
+            # Prune ip tables periodically to prevent unbounded memory growth
+            # under heavy churn or brute-force probing.
+            threading.Thread(target=self._prune_ip_tables, daemon=True).start()
+
+            while self.running:
+                self.server.settimeout(1.0)
+                try:
+                    client, address = self.server.accept()
+                except socket.timeout:
+                    continue
+
+                ip  = address[0]
+                now = time.time()
+
+                with self._ip_lock:
+                    if now < self.ip_blacklist.get(ip, 0):
+                        client.close()
+                        continue
+
+                    last = self.ip_last_seen.get(ip)
+                    if last is not None and (now - last) < 0.1:
+                        self.ip_blacklist[ip] = now + 5
+                        logging.warning(f"Blacklisted {ip} for 5s: sub-second reconnect ({now - last:.3f}s)")
+                        client.close()
+                        continue
+
+                    self.ip_last_seen[ip] = now
+
+                # Check connection cap without locking (GIL-safe read on CPython).
+                if self._active_connections >= self.config.max_connections:
+                    logging.warning(f"Connection limit reached, rejecting {ip}")
+                    client.close()
+                    continue
+
+                # Increment before handing off so the cap check above stays accurate.
+                self._active_connections += 1
+                self._total_connections  += 1
+
+                if self.use_ssl and self.ssl_context:
+                    try:
+                        client = self.ssl_context.wrap_socket(client, server_side=True)
+                    except ssl.SSLError as e:
+                        logging.debug(f"SSL handshake failed: {address[0]} - {e}")
+                        self._active_connections -= 1
+                        client.close()
+                        continue
+
+                # Submit to pool instead of spawning a new thread each time.
+                self.executor.submit(self._handle_connection, client, address)
+
+        except OSError as e:
+            if self.running:
+                logging.error(f"Accept error on port {self.port}: {e}")
+            raise
+        except Exception as e:
+            logging.error(f"Server error on port {self.port}: {e}", exc_info=True)
+            raise
+        finally:
+            if self.server:
+                try:
+                    self.server.close()
+                except Exception:
+                    pass
+                self.server = None
+
+    def run_supervised(self, shutdown_event: threading.Event):
+        """
+        Restart this server on crash with exponential backoff (5s → 10s → 20s → 40s → 60s cap).
+        Returns cleanly when shutdown_event is set or the server exits without error.
+        """
+        delay = 5
+        while not shutdown_event.is_set():
+            self.reset()
+            try:
+                self.start()
+            except Exception as e:
+                if shutdown_event.is_set():
+                    break
+                logging.error(f"[Recovery] Port {self.port} crashed: {e}")
+            else:
+                break   # clean shutdown — do not restart
+            logging.warning(f"[Recovery] Port {self.port}: restarting in {delay}s...")
+            shutdown_event.wait(timeout=delay)
+            delay = min(delay * 2, 60)
+
+    def _backend_connect(self) -> Optional[socket.socket]:
+        """Connect to the backend with retry logic."""
+        cfg = self.config
+        for attempt in range(cfg.backend_retries):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.settimeout(cfg.timeout_conn)
+                if cfg.enable_nodelay:
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                sock.connect((cfg.backend_host, cfg.backend_port))
+                logging.debug(f"  Backend connected: {cfg.backend_host}:{cfg.backend_port}")
+                return sock
+            except ConnectionRefusedError:
+                sock.close()
+                if attempt < cfg.backend_retries - 1:
+                    logging.warning(f"Backend refused, retry {attempt + 1}/{cfg.backend_retries}")
+                    time.sleep(cfg.backend_delay)
+                else:
+                    logging.error(f"Backend unavailable after {cfg.backend_retries} attempts")
+            except Exception as e:
+                sock.close()
+                logging.error(f"Backend error: {e}")
+                return None
+        return None
+
+    def _relay(self, client: socket.socket, backend: socket.socket, cfg: Config) -> tuple[int, int]:
+        """
+        Forward raw bytes between client and backend until one side closes
+        or the idle timeout expires.
+        Returns (bytes_sent, bytes_received).
+        """
+        bytes_sent = bytes_received = 0
+        sockets       = [client, backend]
+        last_activity = time.time()
+
+        while True:
+            if time.time() - last_activity > cfg.timeout_idle:
+                logging.debug(f"Idle timeout ({cfg.timeout_idle}s)")
+                break
+            try:
+                readable, _, exceptional = select.select(sockets, [], sockets, 5.0)
+                if exceptional:
+                    break
+                if readable:
+                    last_activity = time.time()
+                for sock in readable:
+                    chunk = sock.recv(cfg.buffer_size)
+                    if not chunk:
+                        return bytes_sent, bytes_received
+                    # memoryview avoids an internal data copy on sendall()
+                    # for large buffers — free win at high throughput.
+                    mv = memoryview(chunk)
+                    if sock is client:
+                        bytes_received += len(chunk)
+                        backend.sendall(mv)
+                    else:
+                        bytes_sent += len(chunk)
+                        client.sendall(mv)
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                return bytes_sent, bytes_received
+            except Exception:
+                break
+
+        return bytes_sent, bytes_received
+
+    def _handle_connection(self, client: socket.socket, address: tuple):
+        cfg                        = self.config
+        bytes_sent = bytes_received = 0
+        backend                    = None
+        start_time                 = time.time()
+
+        try:
+            logging.info(f"New connection: {address[0]}:{address[1]} [{'SSL' if self.use_ssl else 'Plain'}]")
+
+            if cfg.enable_nodelay:
+                client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+            client.settimeout(cfg.timeout_initial)
+            try:
+                data = client.recv(cfg.buffer_size)
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                if cfg.ignore_early_reset:
+                    logging.debug(f"Early disconnect: {address[0]}")
+                    return
+                raise
+
+            if not data:
+                return
+
+            if cfg.handle_split:
+                client.settimeout(cfg.timeout_split)
+                deadline = time.time() + cfg.timeout_split
+                while time.time() < deadline:
+                    if b'websocket' in data.lower():
+                        break
+                    try:
+                        more = client.recv(cfg.buffer_size)
+                        if not more:
+                            break
+                        data += more
+                    except socket.timeout:
+                        break
+
+            backend = self._backend_connect()
+            if backend is None:
+                return
+
+            response = Handshake(data).build_response(cfg.response_mode, cfg.response_text)
+            if response:
+                try:
+                    client.sendall(response)
+                except (ConnectionResetError, BrokenPipeError):
+                    return
+
+            client.settimeout(cfg.timeout_conn)
+            bytes_sent, bytes_received = self._relay(client, backend, cfg)
+
+        except socket.timeout:
+            logging.debug(f"Timeout: {address[0]}")
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        except Exception as e:
+            logging.error(f"Handler error ({address[0]}): {e}", exc_info=True)
+        finally:
+            if cfg.log_connections:
+                logging.info(f"Closed: {address[0]} "
+                             f"(↓{format_bytes(bytes_sent,    cfg.show_bytes_human)} "
+                             f"↑{format_bytes(bytes_received, cfg.show_bytes_human)}, "
+                             f"{format_duration(time.time() - start_time)})")
+            for sock in [backend, client]:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+
+            # Update counters — GIL makes += atomic on CPython; acquire
+            # stat_lock only for the multi-field update so the snapshot
+            # method always reads a consistent set of values.
+            with self._stat_lock:
+                self._active_connections   -= 1
+                self._total_bytes_sent     += bytes_sent
+                self._total_bytes_received += bytes_received
+
+    def _stats_logger(self):
+        while self.running:
+            time.sleep(self.config.stats_interval)
+            with self._stat_lock:
+                active = self._active_connections
+                total  = self._total_connections
+                sent   = self._total_bytes_sent
+                recv   = self._total_bytes_received
+            logging.info(f"[Stats] Port {self.port}: Active={active}, Total={total}, "
+                         f"↑{format_bytes(sent, self.config.show_bytes_human)} "
+                         f"↓{format_bytes(recv, self.config.show_bytes_human)}, "
+                         f"Uptime={format_duration(time.time() - self.start_time)}")
+
+    def _prune_ip_tables(self):
+        """
+        Periodically evict stale entries from ip_blacklist and ip_last_seen.
+        Without this, both dicts grow unboundedly under heavy connection churn
+        or brute-force probing.
+        """
+        while self.running:
+            time.sleep(60)
+            now = time.time()
+            with self._ip_lock:
+                self.ip_blacklist = {ip: t for ip, t in self.ip_blacklist.items() if t > now}
+                cutoff = now - 300
+                self.ip_last_seen = {ip: t for ip, t in self.ip_last_seen.items() if t > cutoff}
+
+    def stop(self):
+        if self._stopped:
+            return
+        self._stopped = True
+        self.running  = False
+        logging.info(f"Stopping server on port {self.port}...")
+        if self.start_time:
+            with self._stat_lock:
+                total = self._total_connections
+                sent  = self._total_bytes_sent
+                recv  = self._total_bytes_received
+            logging.info(f"Port {self.port}: {total} connections, "
+                         f"↑{format_bytes(sent, self.config.show_bytes_human)} "
+                         f"↓{format_bytes(recv, self.config.show_bytes_human)}, "
+                         f"Uptime: {format_duration(time.time() - self.start_time)}")
+        if self.server:
+            try:
+                self.server.close()
+            except Exception:
+                pass
+        self.executor.shutdown(wait=True, cancel_futures=False)
+
+
+# MAIN
+def main():
+    parser = argparse.ArgumentParser(description='WebSocket Tunnel Server')
+    parser.add_argument('-c', '--config', default='config.yaml', help='Config file (default: config.yaml)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    args = parser.parse_args()
+
+    config = Config(args.config)
+    if args.debug:
+        config.data['logging']['level'] = 'DEBUG'
+    config.setup_logging()
+
+    print(BANNER)
+    print()
+
+    http_ports  = normalize_ports(config.get('ports', 'http'))
+    https_ports = normalize_ports(config.get('ports', 'https'))
+    enable_ssl  = config.get('ports', 'enable_ssl')
+
+    logging.info("=" * 60)
+    logging.info(f"Backend: {config.backend_host}:{config.backend_port}")
+    logging.info(f"HTTP Ports: {', '.join(map(str, http_ports))}")
+    if enable_ssl:
+        logging.info(f"HTTPS Ports: {', '.join(map(str, https_ports))}")
+    if config.response_text:
+        logging.info(f"Custom Response: '{config.response_text}'")
+    if config.stats_interval and config.stats_interval > 0:
+        logging.info(f"Stats Interval: {config.stats_interval}s")
+    logging.info("=" * 60)
+
+    port_configs = [(p, False) for p in http_ports]
+    if enable_ssl:
+        port_configs += [(p, True) for p in https_ports]
+
+    shutdown_event = threading.Event()
+    servers        = []
+    threads        = []
+
+    for port, use_ssl in port_configs:
+        server = TunnelServer(port, use_ssl=use_ssl, config=config)
+        servers.append(server)
+        t = threading.Thread(target=server.run_supervised, args=(shutdown_event,), daemon=False)
+        t.start()
+        threads.append(t)
+
+    def signal_handler(sig, frame):
+        print("\n\nShutting down...")
+        shutdown_event.set()
+        for s in servers:
+            s.stop()
+        time.sleep(0.5)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT,  signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        while not shutdown_event.is_set():
+            time.sleep(0.5)
+            if not any(t.is_alive() for t in threads):
+                break
+    except KeyboardInterrupt:
+        pass
+
+if __name__ == '__main__':
+    main()

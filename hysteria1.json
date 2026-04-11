@@ -1,0 +1,18 @@
+{
+  "listen": ":5669",
+  "protocol": "udp",
+  "cert": "/root/srtunnel/server.crt",
+  "key": "/root/srtunnel/server.key",
+  "up_mbps": 100, 
+  "down_mbps": 100,
+  "auth": {
+    "mode": "passwords",
+    "config": [
+      "UNKNOWN"
+    ]
+  },
+  "obfs": "UNKNOWN",
+  "recv_window_conn": 196608
+}
+
+

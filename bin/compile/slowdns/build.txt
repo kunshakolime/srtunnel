@@ -1,0 +1,28 @@
+REQUIREMENTS:
+1. DNSTT binary - Build from official source:
+   
+   METHOD 1 (Requires Go):
+   apt install golang-go
+   git clone https://www.bamsoftware.com/git/dnstt.git
+   cd dnstt/dnstt-server
+   go build
+   
+   METHOD 2:
+   wget https://www.bamsoftware.com/software/dnstt/dnstt-20241021.zip
+   unzip dnstt-20241021.zip
+   cd dnstt-20241021/dnstt-server
+   go build
+   
+   Or use any DNSTT binary compatible with the standard protocol
+   
+2. DNS Setup: Add these records to your domain:
+   A    ns1.yourdomain.com        → YOUR_SERVER_IP
+   NS   example.yourdomain.com    → ns1.yourdomain.com
+   #optional but recommended
+   A    ns2.yourdomain.com        → YOUR_SERVER_IP
+   NS   example.yourdomain.com    → ns2.yourdomain.com
+   
+3. Iptables: Redirect udp port 53 to 8053 for example:
+
+iptables -t nat -C PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053
+
