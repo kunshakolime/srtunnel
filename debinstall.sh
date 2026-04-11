@@ -107,6 +107,25 @@ systemctl enable nginx
 systemctl restart nginx
 
 
+
+cat > /etc/systemd/system/srapi.service << 'EOF'
+[Unit]
+Description=srtunnel API
+After=network.target
+
+[Service]
+ExecStart=/root/srtunnel/venv/bin/python /root/srtunnel/srapi.py
+WorkingDirectory=/root/srtunnel
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now srapi
+
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 nano config.yaml
 
