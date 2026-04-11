@@ -93,6 +93,20 @@ fi
 export IFACE SSH ID TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
+# ── Setup Nginx ─────────────────────────────────────────────────────────────
+envsubst '$DOMAIN' < srtdash.template > /etc/nginx/sites-available/srtdash
+
+ln -sf /etc/nginx/sites-available/srtdash /etc/nginx/sites-enabled/srtdash
+rm -f /etc/nginx/sites-enabled/default
+
+chown -R www-data:www-data /var/www/srtdash
+chmod -R 755 /var/www/srtdash
+
+nginx -t
+systemctl enable nginx
+systemctl restart nginx
+
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 nano config.yaml
 
