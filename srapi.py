@@ -352,10 +352,27 @@ class ServiceStatusRequest(BaseModel):
 
 @app.get("/api/services")
 def list_services(lines: int = 10, user: str = Depends(get_current_user)):
-    svc_helper.watcher.reload_config()
+    # Pull live state from watcher
+    services = svc_helper.watcher.list_services(lines=lines) or []
+    # Overlay statuses fresh from config.yaml so external edits are visible
+    try:
+        raw = yaml.safe_load(Path("/root/srtunnel/config.yaml").read_text()) or {}
+        block      = raw.get("manager", {})
+        keep_set   = set(block.get("keep",   []) or [])
+        enable_set = set(block.get("enable", []) or [])
+        for svc in services:
+            name = svc.get("name")
+            if name in keep_set:
+                svc["status"] = "keep"
+            elif name in enable_set:
+                svc["status"] = "enable"
+            else:
+                svc["status"] = "disable"
+    except Exception:
+        pass  # if config unreadable, return whatever the watcher has
     return {
-        "watcher": svc_helper.watcher.active,
-        "services": svc_helper.watcher.list_services(lines=lines),
+        "watcher":  svc_helper.watcher.active,
+        "services": services,
     }
 
 @app.post("/api/services/watcher/start")
