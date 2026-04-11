@@ -110,6 +110,7 @@ class _Watcher:
         block = _load_config().get(TMUX_BLOCK, {})
         with self._lock:
             self._services = _parse_services(block)
+            self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0
 
     def _sync_running(self):
         active = _active_sessions()
@@ -127,6 +128,14 @@ class _Watcher:
             time.sleep(0.3)
 
         while self._running:
+            # reload config if it changed on disk
+            try:
+                mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0
+                if mtime != self._config_mtime:
+                    self._reload()
+            except OSError:
+                pass
+
             self._sync_running()
             with self._lock:
                 to_restart = [s for s in self._services if s.status == "keep" and not s.running]
