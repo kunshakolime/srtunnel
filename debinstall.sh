@@ -92,7 +92,7 @@ fi
 
 export IFACE SSH ID TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED
 # ── Render Config ─────────────────────────────────────────────────────────────
-cat ./config.yaml | envsubst > config.yaml
+envsubst < config.template.yaml > config.yaml
 # ── Done ──────────────────────────────────────────────────────────────────────
 nano config.yaml
 
