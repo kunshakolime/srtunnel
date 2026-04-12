@@ -18,7 +18,7 @@ case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 # ── APT Dependencies ──────────────────────────────────────────────────────────
 echo "Installing base dependencies..."
 curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
-apt update -qq && apt install -y -qq git openssh-server python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables speedtest libpam0g-dev nginx libnginx-mod-stream
+apt update -qq && apt install -y -qq git openssh-server stunnel4 python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables speedtest libpam0g-dev nginx libnginx-mod-stream
 
 cd
 git clone https://github.com/kunshakolime/srtunnel.git
