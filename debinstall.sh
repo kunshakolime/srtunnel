@@ -18,7 +18,7 @@ case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 # ── APT Dependencies ──────────────────────────────────────────────────────────
 echo "Installing base dependencies..."
 curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
-apt update -qq && apt install -y -qq git openssh-server python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables speedtest libpam0g-dev nginx
+apt update -qq && apt install -y -qq git openssh-server python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables speedtest libpam0g-dev nginx libnginx-mod-stream
 
 cd
 git clone https://github.com/kunshakolime/srtunnel.git
@@ -50,7 +50,7 @@ $BOT_DIR/venv/bin/pip install fastapi uvicorn python-pam python-jose[cryptograph
 
 
 ln -sf "$BOT_DIR/srtunnel" /usr/sbin/srtunnel
-cp -r ./srtdash /var/www/srtdash
+cp -r ./srtdash /var/www/
 
 # ── Certificates ──────────────────────────────────────────────────────────────
 ./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
@@ -114,9 +114,11 @@ Description=srtunnel API
 After=network.target
 
 [Service]
-ExecStart=/root/srtunnel/venv/bin/python /root/srtunnel/srapi.py
+ExecStart=/root/srtunnel/srapi.py
 WorkingDirectory=/root/srtunnel
 Restart=always
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
 
 [Install]
 WantedBy=multi-user.target
