@@ -13,7 +13,7 @@ manager:
   keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, srapi, stunnel]
   enable: [udp-rules]
   services:
-    stunnel: stunnel stunnel.conf
+    stunnel: stunnel
     srapi: ./srapi.py
     telegram_bot: ./telegram_bot
     pystunnel: ./pystunnel
