@@ -15,7 +15,7 @@ manager:
   services:
     srapi: ./srapi.py
     telegram_bot: ./telegram_bot
-    pystunnel: ./pystunnel.py config.yaml
+    pystunnel: ./pystunnel
     websocket: ./websocket
     dropbear: ./dropbear -EFR -p 127.0.0.1:23 -W 65536 -b /root/srtunnel/bannerssh
     badvpn: ./badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 1000 --client-socket-sndbuf 0 --udp-mtu 9000
@@ -46,7 +46,7 @@ websocket:
   # WebSocket Tunnel Server Configuration
   ports: # Port Configuration
     http: [80, 8080, 8000, 8880]      # HTTP ports (plain text)
-    https: [8443]                      # HTTPS ports (SSL/TLS)
+    https: []                      # HTTPS ports (SSL/TLS)
     enable_ssl: true                   # Enable HTTPS servers
   backend: # Backend Server (SSH, telnet, etc.)
     host: "127.0.0.1"
