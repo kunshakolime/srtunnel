@@ -151,7 +151,7 @@ EOF
 systemctl daemon-reload
 systemctl enable --now srapi
 
-
+ln -sf /root/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
 # ── Done ──────────────────────────────────────────────────────────────────────
 nano config.yaml
 
