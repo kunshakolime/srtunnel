@@ -5,17 +5,24 @@ sys.path.insert(0, "/root/srtunnel")
 
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
+from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from helpers.auth import verify_linux_login, create_token, get_current_user, store_token, revoke_token, list_tokens
 from helpers import core, system, dns
 from helpers import speedtest as st
 from helpers import services as svc_helper
-import yaml, secrets, logging
+import yaml, secrets, logging, traceback, time
 
+# ── Logging setup ─────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("srapi")
 
 def load_config():
@@ -37,7 +44,7 @@ def load_config():
     }
 
 cfg = load_config()
- 
+
 
 def run_launch_commands():
     """Run manager.launch_commands from config.yaml once at startup."""
@@ -54,13 +61,15 @@ def run_launch_commands():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("srapi starting up")
     run_launch_commands()
     yield
+    logger.info("srapi shutting down")
 
 app = FastAPI(lifespan=lifespan)
 
 core.init(cfg)
-dns.init(cfg) 
+dns.init(cfg)
 core.init_db()
 svc_helper.watcher.start()
 
@@ -71,6 +80,63 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Request/response logging middleware ───────────────────────────────────────
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        elapsed = (time.perf_counter() - start) * 1000
+        logger.error(
+            "UNHANDLED  %s %s — %.1fms — %s: %s\n%s",
+            request.method, request.url.path,
+            elapsed,
+            type(exc).__name__, exc,
+            traceback.format_exc(),
+        )
+        raise
+    elapsed = (time.perf_counter() - start) * 1000
+    level = logging.WARNING if response.status_code >= 400 else logging.INFO
+    logger.log(
+        level,
+        "%s  %s %s — %.1fms",
+        response.status_code, request.method, request.url.path, elapsed,
+    )
+    return response
+
+# ── Global exception handlers ─────────────────────────────────────────────────
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    logger.warning(
+        "422 VALIDATION  %s %s — %s",
+        request.method, request.url.path, exc.errors(),
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    level = logging.WARNING if exc.status_code < 500 else logging.ERROR
+    logger.log(
+        level,
+        "%s HTTP  %s %s — %s",
+        exc.status_code, request.method, request.url.path, exc.detail,
+    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "500 UNHANDLED  %s %s — %s: %s\n%s",
+        request.method, request.url.path,
+        type(exc).__name__, exc,
+        traceback.format_exc(),
+    )
+    return JSONResponse(status_code=500, content={"detail": f"Internal error: {type(exc).__name__}: {exc}"})
+
 
 SCOPE_FILE      = Path("/root/srtunnel/helpers/scope.json")
 SERVERLIST_FILE = Path("/root/srtunnel/helpers/serverlist.json")
@@ -97,7 +163,7 @@ def save_serverlist(data):
 class LoginRequest(BaseModel):
     username: str
     password: str
-    label:    Optional[str] = None   # e.g. "my laptop", "dashboard"
+    label:    Optional[str] = None
 
 class ScopeRequest(BaseModel):
     max_users:       Optional[int]  = None
@@ -114,14 +180,14 @@ class CreateUserRequest(BaseModel):
     max_logins: Optional[int] = None
 
 class PasswordRequest(BaseModel):
-    password: Optional[str] = None   # omit for random
+    password: Optional[str] = None
 
 class ExpiryRequest(BaseModel):
     days:   int
-    extend: Optional[bool] = False   # True = add days, False = set from now
+    extend: Optional[bool] = False
 
 class MaxLoginsRequest(BaseModel):
-    max_logins: Optional[int] = None  # None / 0 = unlimited
+    max_logins: Optional[int] = None
 
 class ServerEntry(BaseModel):
     id:    str
@@ -148,10 +214,12 @@ def health():
 @app.post("/api/login")
 def login(data: LoginRequest):
     if not verify_linux_login(data.username, data.password):
+        logger.warning("Failed login attempt for user: %s", data.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     label = data.label or f"dashboard-{secrets.token_hex(4)}"
     token = create_token(data.username)
     store_token(token, data.username, label)
+    logger.info("Login success: user=%s label=%s", data.username, label)
     return {"token": token}
 
 @app.get("/api/me")
@@ -172,6 +240,7 @@ def get_tokens(user: str = Depends(get_current_user)):
 def delete_token(data: RevokeRequest, user: str = Depends(get_current_user)):
     if not revoke_token(data.token):
         raise HTTPException(status_code=404, detail="Token not found")
+    logger.info("Token revoked by %s", user)
     return {"status": "revoked"}
 
 
@@ -184,6 +253,7 @@ def get_scope(user: str = Depends(get_current_user)):
 @app.post("/api/scope")
 def set_scope(data: ScopeRequest, user: str = Depends(get_current_user)):
     save_scope(data.dict())
+    logger.info("Scope updated by %s: %s", user, data.dict())
     return {"status": "saved"}
 
 
@@ -196,10 +266,14 @@ def get_serverlist(user: str = Depends(get_current_user)):
 @app.post("/api/serverlist")
 def set_serverlist(data: ServerListRequest, user: str = Depends(get_current_user)):
     save_serverlist([s.dict() for s in data.servers])
+    logger.info("Serverlist updated by %s (%d entries)", user, len(data.servers))
     return {"status": "saved"}
+
 @app.get("/api/serverlist/status")
 def get_serverlist_status(user: str = Depends(get_current_user)):
     return svc_helper._load_serverlist() or []
+
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/users")
@@ -221,7 +295,7 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Max user limit reached")
 
     days = data.days
-    max_expiry    = scope.get("max_expiry")
+    max_expiry     = scope.get("max_expiry")
     default_expiry = scope.get("default_expiry")
     if not days and default_expiry:
         days = default_expiry
@@ -238,8 +312,11 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
     )
     if not ok:
         detail = "Password already in use" if err == "password_exists" else "Username already exists"
+        logger.warning("create_user failed for %r: %s (err=%s)", data.username, detail, err)
         raise HTTPException(status_code=400, detail=detail)
 
+    logger.info("User created: %s by %s (days=%s, max_logins=%s, linux_ok=%s)",
+                data.username, user, days, max_logins, linux_ok)
     return {
         "username":   data.username,
         "password":   password,
@@ -261,6 +338,7 @@ def get_user(username: str, user: str = Depends(get_current_user)):
 def delete_user(username: str, user: str = Depends(get_current_user)):
     if not core.delete_user(username):
         raise HTTPException(status_code=404, detail="User not found")
+    logger.info("User deleted: %s by %s", username, user)
     return {"status": "deleted"}
 
 @app.post("/api/users/{username}/password")
@@ -268,20 +346,25 @@ def change_password(username: str, data: PasswordRequest, user: str = Depends(ge
     ok, old, new_or_err = core.change_password(username, data.password)
     if not ok:
         detail = "Password already in use" if new_or_err == "password_exists" else "User not found"
+        logger.warning("change_password failed for %r: %s", username, detail)
         raise HTTPException(status_code=400, detail=detail)
+    logger.info("Password changed for %s by %s", username, user)
     return {"username": username, "old_password": old, "new_password": new_or_err}
 
 @app.post("/api/users/{username}/expiry")
 def modify_expiry(username: str, data: ExpiryRequest, user: str = Depends(get_current_user)):
     ok, new_exp = core.modify_expiry(username, data.days, extend=data.extend)
     if not ok:
+        logger.warning("modify_expiry failed for %r: days=%s extend=%s", username, data.days, data.extend)
         raise HTTPException(status_code=400, detail="Failed to update expiry")
+    logger.info("Expiry updated: %s → %s by %s", username, new_exp, user)
     return {"username": username, "expires": new_exp[:10] if new_exp else None}
 
 @app.delete("/api/users/{username}/expiry")
 def remove_expiry(username: str, user: str = Depends(get_current_user)):
     if not core.set_expiry(username, None):
         raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Expiry removed: %s by %s", username, user)
     return {"username": username, "expires": None}
 
 @app.post("/api/users/{username}/maxlogins")
@@ -289,16 +372,19 @@ def set_maxlogins(username: str, data: MaxLoginsRequest, user: str = Depends(get
     limit = None if (data.max_logins is None or data.max_logins == 0) else data.max_logins
     if not core.set_maxlogins(username, limit):
         raise HTTPException(status_code=404, detail="User not found")
+    logger.info("max_logins set: %s → %s by %s", username, limit, user)
     return {"username": username, "max_logins": limit}
 
 @app.post("/api/users/{username}/activate")
 def activate_user(username: str, user: str = Depends(get_current_user)):
     core.set_active(username, True)
+    logger.info("User activated: %s by %s", username, user)
     return {"username": username, "status": "Active"}
 
 @app.post("/api/users/{username}/deactivate")
 def deactivate_user(username: str, user: str = Depends(get_current_user)):
     core.set_active(username, False)
+    logger.info("User deactivated: %s by %s", username, user)
     return {"username": username, "status": "Inactive"}
 
 @app.post("/api/users/{username}/toggle-temporary")
@@ -307,6 +393,7 @@ def toggle_temporary(username: str, user: str = Depends(get_current_user)):
     u = core.get_user(username)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Toggled temporary: %s → %s by %s", username, u["temporary"], user)
     return {"username": username, "temporary": u["temporary"]}
 
 
@@ -314,35 +401,69 @@ def toggle_temporary(username: str, user: str = Depends(get_current_user)):
 
 @app.post("/api/sync")
 def sync(user: str = Depends(get_current_user)):
+    logger.info("Manual sync triggered by %s", user)
     return core.sync()
 
 @app.get("/api/system")
 def system_info(user: str = Depends(get_current_user)):
     iface = cfg["IFACE"]
-    info  = system.system_info() or {}
-    bw    = system.bandwidth_usage(iface) or {}
+    try:
+        info = system.system_info() or {}
+    except Exception as e:
+        logger.error("system.system_info() failed: %s\n%s", e, traceback.format_exc())
+        info = {}
+    try:
+        bw = system.bandwidth_usage(iface) or {}
+    except Exception as e:
+        logger.error("system.bandwidth_usage(%r) failed: %s\n%s", iface, e, traceback.format_exc())
+        bw = {}
     return {
-        "ip":          system.public_ip(),
-        "cpu":         info.get("cpu"),
-        "ram_used":    info.get("ram_used"),
-        "ram_total":   info.get("ram_total"),
-        "ram_percent": info.get("ram_percent"),
-        "disk_used":   info.get("disk_used"),
-        "disk_total":  info.get("disk_total"),
-        "disk_percent":info.get("disk_percent"),
-        "bandwidth":   bw,
-        "connections": system.total_connections(),
+        "ip":           system.public_ip(),
+        "cpu":          info.get("cpu"),
+        "ram_used":     info.get("ram_used"),
+        "ram_total":    info.get("ram_total"),
+        "ram_percent":  info.get("ram_percent"),
+        "disk_used":    info.get("disk_used"),
+        "disk_total":   info.get("disk_total"),
+        "disk_percent": info.get("disk_percent"),
+        "bandwidth":    bw,
+        "connections":  system.total_connections(),
     }
 
 @app.get("/api/speedtest")
 def speedtest(user: str = Depends(get_current_user)):
-    proc, progress_file = st.start()
-    proc.wait()
-    result = st.parse_result(progress_file)
-    st.cleanup(progress_file)
-    if not result:
-        raise HTTPException(status_code=500, detail="Speed test failed")
-    return result
+    logger.info("Speedtest started by %s", user)
+    try:
+        proc, progress_file = st.start()
+        logger.info("Speedtest process started, pid=%s progress_file=%s", getattr(proc, 'pid', '?'), progress_file)
+        proc.wait()
+        returncode = proc.returncode
+        stderr_out = proc.stderr.read() if proc.stderr else b""
+        stdout_out = proc.stdout.read() if proc.stdout else b""
+        logger.info("Speedtest process exited: returncode=%s", returncode)
+        if stderr_out:
+            logger.warning("Speedtest stderr: %s", stderr_out.decode(errors="replace").strip())
+        if stdout_out:
+            logger.info("Speedtest stdout: %s", stdout_out.decode(errors="replace").strip())
+        result = st.parse_result(progress_file)
+        st.cleanup(progress_file)
+        if not result:
+            logger.error(
+                "Speedtest parse_result returned None — returncode=%s stdout=%r stderr=%r progress_file=%s",
+                returncode, stdout_out, stderr_out, progress_file,
+            )
+            raise HTTPException(status_code=500, detail="Speed test failed — no result parsed")
+        logger.info("Speedtest complete: download=%s upload=%s",
+                    result.get("download"), result.get("upload"))
+        return result
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        logger.error("Speedtest binary not found: %s", e)
+        raise HTTPException(status_code=500, detail=f"Speedtest binary not found: {e}")
+    except Exception as e:
+        logger.error("Speedtest unexpected error: %s\n%s", e, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Speedtest error: {type(e).__name__}: {e}")
 
 
 # ── Services (tmux) ───────────────────────────────────────────────────────────
@@ -352,9 +473,7 @@ class ServiceStatusRequest(BaseModel):
 
 @app.get("/api/services")
 def list_services(lines: int = 10, user: str = Depends(get_current_user)):
-    # Pull live state from watcher
     services = svc_helper.watcher.list_services(lines=lines) or []
-    # Overlay statuses fresh from config.yaml so external edits are visible
     try:
         raw = yaml.safe_load(Path("/root/srtunnel/config.yaml").read_text()) or {}
         block      = raw.get("manager", {})
@@ -368,8 +487,8 @@ def list_services(lines: int = 10, user: str = Depends(get_current_user)):
                 svc["status"] = "enable"
             else:
                 svc["status"] = "disable"
-    except Exception:
-        pass  # if config unreadable, return whatever the watcher has
+    except Exception as e:
+        logger.warning("Failed to overlay service statuses from config.yaml: %s", e)
     return {
         "watcher":  svc_helper.watcher.active,
         "services": services,
@@ -378,40 +497,51 @@ def list_services(lines: int = 10, user: str = Depends(get_current_user)):
 @app.post("/api/services/watcher/start")
 def watcher_start(user: str = Depends(get_current_user)):
     started = svc_helper.watcher.start()
+    logger.info("Watcher start requested by %s — changed=%s", user, started)
     return {"watcher": svc_helper.watcher.active, "changed": started}
 
 @app.post("/api/services/watcher/stop")
 def watcher_stop(user: str = Depends(get_current_user)):
     stopped = svc_helper.watcher.stop()
+    logger.info("Watcher stop requested by %s — changed=%s", user, stopped)
     return {"watcher": svc_helper.watcher.active, "changed": stopped}
 
 @app.post("/api/services/{name}/start")
 def start_service(name: str, user: str = Depends(get_current_user)):
     ok, detail = svc_helper.watcher.start_service(name)
     if not ok:
+        logger.warning("start_service failed: %s — %s", name, detail)
         raise HTTPException(status_code=404, detail=detail)
+    logger.info("Service started: %s by %s", name, user)
     return {"service": name, "status": detail}
 
 @app.post("/api/services/{name}/stop")
 def stop_service(name: str, user: str = Depends(get_current_user)):
     ok, detail = svc_helper.watcher.stop_service(name)
     if not ok:
+        logger.warning("stop_service failed: %s — %s", name, detail)
         raise HTTPException(status_code=404, detail=detail)
+    logger.info("Service stopped: %s by %s", name, user)
     return {"service": name, "status": detail}
 
 @app.post("/api/services/{name}/restart")
 def restart_service(name: str, user: str = Depends(get_current_user)):
     ok, detail = svc_helper.watcher.start_service(name)
     if not ok:
+        logger.warning("restart_service failed: %s — %s", name, detail)
         raise HTTPException(status_code=404, detail=detail)
+    logger.info("Service restarted: %s by %s", name, user)
     return {"service": name, "status": "restarted"}
 
 @app.post("/api/services/{name}/status")
 def set_service_status(name: str, data: ServiceStatusRequest, user: str = Depends(get_current_user)):
     ok, detail = svc_helper.watcher.set_status(name, data.status)
     if not ok:
+        logger.warning("set_service_status failed: %s → %s — %s", name, data.status, detail)
         raise HTTPException(status_code=400, detail=detail)
+    logger.info("Service status set: %s → %s by %s", name, data.status, user)
     return {"service": name, "status": detail}
+
 
 # ── Backup ────────────────────────────────────────────────────────────────────
 
@@ -420,6 +550,7 @@ def backup_db(user: str = Depends(get_current_user)):
     db = Path("/root/srtunnel/users.db")
     if not db.exists():
         raise HTTPException(status_code=404, detail="Database not found")
+    logger.info("DB backup downloaded by %s", user)
     return FileResponse(str(db), filename="users.db", media_type="application/octet-stream")
 
 @app.post("/api/restore-db")
@@ -431,6 +562,7 @@ async def restore_db(file: UploadFile = File(...), user: str = Depends(get_curre
     os.remove(tmp)
     core.init_db()
     core.sync()
+    logger.info("DB restored by %s", user)
     return {"status": "restored"}
 
 @app.post("/api/merge-db")
@@ -441,7 +573,9 @@ async def merge_db(file: UploadFile = File(...), user: str = Depends(get_current
     ok = core.sync_db(tmp)
     os.remove(tmp)
     if not ok:
+        logger.warning("merge-db rejected invalid file uploaded by %s", user)
         raise HTTPException(status_code=400, detail="Invalid database file")
+    logger.info("DB merged by %s", user)
     return {"status": "merged"}
 
 
@@ -461,7 +595,9 @@ def dns_create(data: DnsRecordRequest, user: str = Depends(get_current_user)):
     if not result.get("success"):
         errors = result.get("errors", [])
         msg    = errors[0].get("message") if errors else "Unknown error"
+        logger.warning("DNS create failed: %s %s → %s: %s", data.type, data.name, data.value, msg)
         raise HTTPException(status_code=400, detail=msg)
+    logger.info("DNS record created: %s %s → %s by %s", data.type, data.name, data.value, user)
     return result["result"]
 
 @app.delete("/api/dns/{record_id}")
@@ -470,9 +606,12 @@ def dns_delete(record_id: str, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail="Cloudflare not configured")
     result = dns.delete_record(record_id)
     if not result.get("success"):
+        logger.warning("DNS delete failed: record_id=%s", record_id)
         raise HTTPException(status_code=400, detail="Could not delete record")
+    logger.info("DNS record deleted: %s by %s", record_id, user)
     return {"status": "deleted"}
+
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("srapi:app", host="127.0.0.1", port=51700, reload=False)
+    uvicorn.run("srapi:app", host="127.0.0.1", port=51700, reload=False, access_log=False)
