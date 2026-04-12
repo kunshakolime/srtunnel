@@ -279,3 +279,53 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
   .user-panel{width:100%;right:-100%}
   .speed-results{grid-template-columns:1fr}
 }
+
+/* ── MOBILE (portrait phones) ────────────────────────────────────────────── */
+@media (max-width: 480px) {
+
+  /* login */
+  .login-box { padding: 24px 18px; border-radius: 16px; }
+
+  /* shrink app padding already handled at 700px, tighten further */
+  .app { padding: 8px 8px 24px; }
+
+  /* hub: let server cards shrink more */
+  .hub { padding: 6px 8px; }
+  .hub-srv-name { max-width: 80px; }
+  .hub-srv-url  { max-width: 80px; }
+
+  /* topbar: stack nav above right controls */
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 10px;
+  }
+  .nav { gap: 3px; }
+  .nav button { font-size: 12px; padding: 6px 9px; }
+
+  /* top-right: hide low-priority items, keep refresh stamp */
+  #tokenCopyBtn { display: none; }
+  #topUser      { display: none; }
+  .top-right { justify-content: flex-start; }
+
+  /* content: less padding */
+  .content { padding: 14px 12px; border-radius: 14px; }
+
+  /* metrics: 2-col grid on phone is fine, drop min-width */
+  .metric-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .metric { padding: 13px 12px; }
+  .metric-value { font-size: 19px; }
+
+  /* tables: tighten cell padding so more fits */
+  th, td { padding: 9px 8px; font-size: 12px; }
+
+  /* user panel: full-screen slide-in */
+  .user-panel { width: 100%; right: -100%; padding: 18px 14px; }
+
+  /* modals: full-width with small margin */
+  .modal { padding: 12px; }
+  .modal-box { padding: 20px 16px; border-radius: 14px; }
+
+  /* scope grid already goes 1-col at 600px */
+}
