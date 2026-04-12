@@ -202,7 +202,8 @@ async function renderHub() {
   if (!container) return;
 
   container.innerHTML = list.map(s => {
-    const dotClass = s.online === true ? 'online' : s.online === false ? 'offline' : 'checking';
+    const cached = _statusCache[s.url];
+    const dotClass = cached ? (cached.online ? 'online' : 'offline') : 'checking';
     const isHome   = s.url === HOME_API;
     return `
     <div class="hub-server ${s.id === activeId ? 'active' : ''}" id="hub-srv-${s.id}" onclick="switchServer('${s.id}')">
@@ -271,6 +272,7 @@ function switchServer(id) {
   setActiveId(id);
   applyActive();
   renderHub();
+  _fetchServerStatus();  // refresh dots immediately instead of waiting for the 20s timer
   const active = getActiveServer();
   document.getElementById('topUser').textContent = active?.name || '—';
   showPage(_currentPage, document.querySelector('.nav button.active'));
