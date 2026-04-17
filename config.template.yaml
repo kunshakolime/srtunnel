@@ -26,7 +26,7 @@ manager:
     hysteria2: ./hysteria2 server --config hysteria2.yaml
     slowdns: ./dnstt-server -udp :8053 -privkey-file slowdns.key ${SLOWDNSDOMAIN} 127.0.0.1:${SSH}
     udp-rules: iptables -t nat -D PREROUTING -i ${IFACE} -p udp --dport 1:65535 -j DNAT --to-destination :36712
-    xray: /usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+    xray: ./xray run -config /root/srtunnel/xray.json
 telegram_bot:
   db_file: "users.db"
   config_file: "./zivpn.json"

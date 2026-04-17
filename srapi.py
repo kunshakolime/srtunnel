@@ -4,7 +4,7 @@ import sys, json, os, shutil, subprocess
 sys.path.insert(0, "/root/srtunnel")
 
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Body
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from helpers.auth import verify_linux_login, create_token, get_current_user, store_token, revoke_token, list_tokens
-from helpers import core, system, dns
+from helpers import core, system, dns, xray
 from helpers import speedtest as st
 from helpers import services as svc_helper
 import yaml, secrets, logging, traceback, time
@@ -41,6 +41,10 @@ def load_config():
         "CF_TOKEN":         app.get("cf_token", ""),
         "CF_ZONE":          app.get("cf_zone", ""),
         "CF_ROOT_DOMAIN":   app.get("cf_root_domain", ""),
+        "XRAY_INBOUND_TAG": app.get("xray_inbound_tag", ""),
+        "XRAY_CONFIG":      app.get("xray_config", "/usr/local/etc/xray/config.json"),
+        "XRAY_API_PORT":    app.get("xray_api_port", 10085),
+        "XRAY_BINARY":      app.get("xray_binary", "xray"),
     }
 
 cfg = load_config()
@@ -178,6 +182,7 @@ class CreateUserRequest(BaseModel):
     days:       Optional[int] = None
     temporary:  Optional[bool] = False
     max_logins: Optional[int] = None
+    services:   Optional[list[str]] = None
 
 class PasswordRequest(BaseModel):
     password: Optional[str] = None
@@ -203,6 +208,13 @@ class DnsRecordRequest(BaseModel):
     name:    str
     value:   str
     proxied: Optional[bool] = False
+
+class XrayUserRequest(BaseModel):
+    username: str
+    password: Optional[str] = None
+    uid: Optional[str] = None
+    flow: Optional[str] = None
+    alter_id: Optional[int] = 0
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -274,6 +286,59 @@ def get_serverlist_status(user: str = Depends(get_current_user)):
     return svc_helper._load_serverlist() or []
 
 
+# ── Xray ──────────────────────────────────────────────────────────────────────
+
+@app.get("/api/xray/inbounds")
+def list_xray_inbounds(user: str = Depends(get_current_user)):
+    return xray.list_inbounds()
+
+@app.post("/api/xray/inbounds")
+def add_xray_inbound(inbound: dict = Body(...), user: str = Depends(get_current_user)):
+    ok, msg = xray.add_inbound(inbound)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "added", "tag": inbound.get("tag")}
+
+@app.delete("/api/xray/inbounds/{tag}")
+def remove_xray_inbound(tag: str, user: str = Depends(get_current_user)):
+    ok, msg = xray.remove_inbound(tag)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "removed", "tag": tag}
+
+@app.get("/api/xray/inbounds/{tag}/users")
+def list_xray_inbound_users(tag: str, user: str = Depends(get_current_user)):
+    return xray.list_users(tag)
+
+@app.post("/api/xray/inbounds/{tag}/users")
+def add_xray_inbound_user(tag: str, data: XrayUserRequest, user: str = Depends(get_current_user)):
+    ok, identifier, err = xray.add_user(
+        tag,
+        data.username,
+        uid=data.uid,
+        password=data.password,
+        flow=data.flow or '',
+        alter_id=data.alter_id or 0,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=err or "Failed to add Xray user")
+    return {"tag": tag, "username": data.username, "id": identifier}
+
+@app.delete("/api/xray/inbounds/{tag}/users/{username}")
+def remove_xray_inbound_user(tag: str, username: str, user: str = Depends(get_current_user)):
+    ok, err = xray.remove_user(tag, username)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err or "Failed to remove Xray user")
+    return {"tag": tag, "username": username}
+
+@app.get("/api/xray/users/{username}/stats")
+def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
+    stats = xray.get_user_stats(username)
+    if stats is None:
+        raise HTTPException(status_code=404, detail="Xray stats unavailable")
+    return stats
+
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/users")
@@ -308,21 +373,23 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
         max_logins = scope_max
 
     ok, password, expires, linux_ok, err = core.add_user(
-        data.username, data.password, days, data.temporary, max_logins
+        data.username, data.password, days, data.temporary, max_logins, data.services
     )
     if not ok:
         detail = "Password already in use" if err == "password_exists" else "Username already exists"
         logger.warning("create_user failed for %r: %s (err=%s)", data.username, detail, err)
         raise HTTPException(status_code=400, detail=detail)
 
-    logger.info("User created: %s by %s (days=%s, max_logins=%s, linux_ok=%s)",
-                data.username, user, days, max_logins, linux_ok)
+    user_obj = core.get_user(data.username)
+    logger.info("User created: %s by %s (days=%s, max_logins=%s, linux_ok=%s, services=%s)",
+                data.username, user, days, max_logins, linux_ok, user_obj.get("services") if user_obj else [])
     return {
         "username":   data.username,
         "password":   password,
         "expires":    expires[:10] if expires else None,
         "temporary":  data.temporary,
         "max_logins": max_logins,
+        "services":   user_obj.get("services", []) if user_obj else [],
         "linux_ok":   linux_ok,
     }
 
@@ -395,6 +462,17 @@ def toggle_temporary(username: str, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
     logger.info("Toggled temporary: %s → %s by %s", username, u["temporary"], user)
     return {"username": username, "temporary": u["temporary"]}
+
+class SetServicesRequest(BaseModel):
+    services: list[str]
+
+@app.post("/api/users/{username}/services")
+def set_user_services(username: str, data: SetServicesRequest, user: str = Depends(get_current_user)):
+    if not core.set_services(username, data.services):
+        raise HTTPException(status_code=404, detail="User not found")
+    u = core.get_user(username)
+    logger.info("Services set: %s → %s by %s", username, data.services, user)
+    return {"username": username, "services": u.get("services", []) if u else []}
 
 
 # ── Sync & System ─────────────────────────────────────────────────────────────
