@@ -59,15 +59,16 @@ def _c(key, default=None):
 
 
 def _config_path() -> str:
-    return _c("XRAY_CONFIG", "/root/srtunnel/xray.json")
+    return _c("XRAY_CONFIG")
 
 
 def _api_port() -> int:
-    return int(_c("XRAY_API_PORT", 10085))
+    port = _c("XRAY_API_PORT")
+    return int(port) if port else 10085
 
 
 def _binary() -> str:
-    return _c("XRAY_BINARY", "/root/srtunnel/xray-linux-arm64")
+    return _c("XRAY_BINARY", "xray")
 
 
 # ── JSON config helpers ───────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ def _binary() -> str:
 def read_config() -> dict:
     """Load xray config.json. Returns {} on missing/error."""
     try:
-        with open(_config_path()) as f:
+        with open(_config_path(), encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
@@ -90,7 +91,7 @@ def write_config(data: dict) -> bool:
     tmp = path + ".tmp"
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, path)
         return True
@@ -101,35 +102,85 @@ def write_config(data: dict) -> bool:
 
 # ── gRPC / CLI wrappers ───────────────────────────────────────────────────────
 
-def _xray_api(*args, input_json: dict | None = None) -> tuple[bool, str]:
+def _xray_api_rmu(tag: str, email: str) -> tuple[bool, str]:
     """
-    Run:  xray api --server=127.0.0.1:<port> <args…>
-    If input_json is given it is piped to stdin.
+    Run: xray api rmu --server=127.0.0.1:<port> -tag=<tag> <email>
     Returns (success, stdout_or_stderr).
     """
-    cmd = [_binary(), "api", f"--server=127.0.0.1:{_api_port()}", *args]
+    cmd = [_binary(), "api", "rmu", f"--server=127.0.0.1:{_api_port()}", f"-tag={tag}", email]
     try:
         result = subprocess.run(
             cmd,
-            input=json.dumps(input_json).encode() if input_json else None,
             capture_output=True,
             timeout=10,
         )
         out = result.stdout.decode().strip()
         err = result.stderr.decode().strip()
         if result.returncode != 0:
-            logger.warning("xray api %s failed (rc=%d): %s", " ".join(args), result.returncode, err or out)
+            # Check if it's an "unknown command" error (API not supported)
+            if "unknown command" in (err or out):
+                logger.debug("xray api not supported in this build, skipping runtime call")
+                return False, "API not supported"
+            logger.warning("xray api rmu failed (rc=%d): %s", result.returncode, err or out)
             return False, err or out
         return True, out
     except FileNotFoundError:
-        logger.error("xray binary not found at '%s'", _binary())
-        return False, "xray binary not found"
+        logger.warning("xray binary not found: %s", _binary())
+        return False, f"xray binary not found: {_binary()}"
     except subprocess.TimeoutExpired:
-        logger.error("xray api call timed out: %s", " ".join(args))
+        logger.warning("xray api rmu timed out")
         return False, "timeout"
     except Exception as e:
-        logger.error("xray api unexpected error: %s", e)
+        logger.warning("xray api rmu error: %s", e)
         return False, str(e)
+
+
+def _xray_api_adu(user_json: dict) -> tuple[bool, str]:
+    """
+    Run: xray api adu --server=127.0.0.1:<port> <temp_file.json>
+    Creates a temporary JSON file with user data.
+    Returns (success, stdout_or_stderr).
+    """
+    import tempfile
+    import os
+    
+    # Create temp file with user JSON
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        json.dump(user_json, f)
+        temp_file = f.name
+    
+    try:
+        cmd = [_binary(), "api", "adu", f"--server=127.0.0.1:{_api_port()}", temp_file]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=10,
+        )
+        out = result.stdout.decode().strip()
+        err = result.stderr.decode().strip()
+        if result.returncode != 0:
+            # Check if it's an "unknown command" error (API not supported)
+            if "unknown command" in (err or out):
+                logger.debug("xray api not supported in this build, skipping runtime call")
+                return False, "API not supported"
+            logger.warning("xray api adu failed (rc=%d): %s", result.returncode, err or out)
+            return False, err or out
+        return True, out
+    except FileNotFoundError:
+        logger.warning("xray binary not found: %s", _binary())
+        return False, f"xray binary not found: {_binary()}"
+    except subprocess.TimeoutExpired:
+        logger.warning("xray api adu timed out")
+        return False, "timeout"
+    except Exception as e:
+        logger.warning("xray api adu error: %s", e)
+        return False, str(e)
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(temp_file)
+        except:
+            pass
 
 
 # ── Inbound management ────────────────────────────────────────────────────────
@@ -274,41 +325,71 @@ def add_user(
     if flow:
         payload["user"]["flow"] = flow
 
-    # 1. Runtime
-    ok, msg = _xray_api("adduser", "--json", input_json=payload)
-    if not ok:
-        return False, "", msg
+    # 1. Runtime (attempt, but don't fail if Xray isn't running or API not supported)
+    ok, msg = _xray_api_adu(payload)
+    if ok:
+        logger.debug("xray add_user runtime: %s@%s succeeded", email, tag)
+    elif "API not supported" in msg:
+        logger.debug("xray add_user runtime: %s@%s skipped (API not supported in this Xray build)", email, tag)
+    else:
+        logger.warning("xray add_user runtime: %s@%s failed: %s (will persist to config.json only)", email, tag, msg)
 
-    # 2. Persist
+    # 2. Persist (always do this regardless of runtime success)
     cfg = read_config()
+    found = False
     for ib in cfg.get("inbounds", []):
         if ib.get("tag") == tag:
             clients = ib.setdefault("settings", {}).setdefault("clients", [])
             # Remove existing entry for same email to avoid duplication
             ib["settings"]["clients"] = [c for c in clients if c.get("email") != email]
             ib["settings"]["clients"].append(client)
+            found = True
+            logger.debug("xray add_user persist: added %s to inbound config, now %d clients", email, len(ib["settings"]["clients"]))
             break
-    write_config(cfg)
+    
+    if not found:
+        logger.error("xray add_user persist: inbound '%s' not found in config.json", tag)
+        return False, "", f"inbound '{tag}' not in config.json"
+    
+    if not write_config(cfg):
+        logger.error("xray add_user persist: failed to write config.json")
+        return False, "", "failed to write config.json"
 
-    logger.info("xray add_user: tag=%s email=%s protocol=%s", tag, email, protocol)
+    logger.info("xray add_user: tag=%s email=%s protocol=%s (runtime_ok=%s)", tag, email, protocol, ok)
     return True, identifier, ""
 
 
 def remove_user(tag: str, email: str) -> tuple[bool, str]:
     """Remove a user (by email) from an inbound at runtime and from config.json."""
-    # 1. Runtime
-    ok, msg = _xray_api("rmuser", "--json", input_json={"tag": tag, "email": email})
-    if not ok:
-        return False, msg
+    # 1. Runtime (attempt, but don't fail if API not supported)
+    ok, msg = _xray_api_rmu(tag, email)
+    if ok:
+        logger.debug("xray remove_user runtime: %s@%s succeeded", email, tag)
+    elif "API not supported" in msg:
+        logger.debug("xray remove_user runtime: %s@%s skipped (API not supported)", email, tag)
+    else:
+        logger.warning("xray remove_user runtime: %s@%s failed: %s (will persist to config.json only)", email, tag, msg)
 
-    # 2. Persist
+    # 2. Persist (always do this)
     cfg = read_config()
+    found = False
     for ib in cfg.get("inbounds", []):
         if ib.get("tag") == tag:
             clients = ib.get("settings", {}).get("clients", [])
+            before = len(clients)
             ib["settings"]["clients"] = [c for c in clients if c.get("email") != email]
+            after = len(ib["settings"]["clients"])
+            found = True
+            logger.debug("xray remove_user persist: removed %s from inbound config (%d -> %d clients)", email, before, after)
             break
-    write_config(cfg)
+    
+    if not found:
+        logger.error("xray remove_user persist: inbound '%s' not found in config.json", tag)
+        return False, f"inbound '{tag}' not found in config.json"
+    
+    if not write_config(cfg):
+        logger.error("xray remove_user persist: failed to write config.json")
+        return False, "failed to write config.json"
 
     logger.info("xray remove_user: tag=%s email=%s", tag, email)
     return True, "ok"
@@ -478,30 +559,43 @@ def sync_users_to_inbound(tag: str, active_users: list[dict]) -> bool:
 
     Uses email = username as the unique key.
     """
+    logger.info("xray sync_users_to_inbound: tag=%s, %d active users from DB", tag, len(active_users))
+    
     inbound = get_inbound(tag)
     if inbound is None:
-        logger.warning("xray sync_users_to_inbound: inbound '%s' not found", tag)
+        logger.error("xray sync_users_to_inbound: inbound '%s' not found in config", tag)
         return False
 
     protocol = inbound.get("protocol", "vless").lower()
     existing_emails = {c.get("email") for c in list_users(tag)}
     target_emails   = {u["username"] for u in active_users}
+    
+    logger.debug("xray sync_users_to_inbound: protocol=%s, existing=%s, target=%s", protocol, existing_emails, target_emails)
 
     # Add missing
     for user in active_users:
         email = user["username"]
         if email not in existing_emails:
+            logger.debug("xray sync_users_to_inbound: adding %s", email)
             if protocol == "trojan":
                 ok, _, err = add_user(tag, email, password=user["password"])
             else:
                 ok, _, err = add_user(tag, email, uid=user.get("uid"))
             if not ok:
-                logger.warning("xray sync: failed to add %s to %s: %s", email, tag, err)
+                logger.error("xray sync: failed to add %s to %s: %s", email, tag, err)
+            else:
+                logger.debug("xray sync: successfully added %s to %s", email, tag)
+        else:
+            logger.debug("xray sync_users_to_inbound: %s already exists", email)
 
     # Remove stale
     for email in existing_emails - target_emails:
+        logger.debug("xray sync_users_to_inbound: removing %s", email)
         ok, err = remove_user(tag, email)
         if not ok:
             logger.warning("xray sync: failed to remove %s from %s: %s", email, tag, err)
-
+        else:
+            logger.debug("xray sync: successfully removed %s from %s", email, tag)
+    
+    logger.info("xray sync_users_to_inbound: complete")
     return True

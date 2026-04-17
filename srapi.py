@@ -41,10 +41,10 @@ def load_config():
         "CF_TOKEN":         app.get("cf_token", ""),
         "CF_ZONE":          app.get("cf_zone", ""),
         "CF_ROOT_DOMAIN":   app.get("cf_root_domain", ""),
-        "XRAY_INBOUND_TAG": app.get("xray_inbound_tag", ""),
-        "XRAY_CONFIG":      app.get("xray_config", "/usr/local/etc/xray/config.json"),
+        "XRAY_INBOUND_TAG": app.get("xray_inbound_tag", "xray-vless"),
+        "XRAY_CONFIG":      app.get("xray_config", "./root/srtunnel/xray.json"),
         "XRAY_API_PORT":    app.get("xray_api_port", 10085),
-        "XRAY_BINARY":      app.get("xray_binary", "xray"),
+        "XRAY_BINARY":      app.get("xray_binary", "/root/srtunnel/xray"),
     }
 
 cfg = load_config()
@@ -383,6 +383,10 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
     user_obj = core.get_user(data.username)
     logger.info("User created: %s by %s (days=%s, max_logins=%s, linux_ok=%s, services=%s)",
                 data.username, user, days, max_logins, linux_ok, user_obj.get("services") if user_obj else [])
+
+    # Provision services
+    core.sync()
+
     return {
         "username":   data.username,
         "password":   password,
