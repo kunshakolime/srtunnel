@@ -3,6 +3,15 @@
 async function loadDashboard() {
   try {
     const res = await apiFetch('/api/system');
+    if (!res.ok) {
+      const err = await res.text();
+      document.getElementById('metrics').innerHTML = '<div class="metric"><div class="metric-label">Unable to load metrics</div><div class="metric-value">See console for details</div></div>';
+      document.getElementById('bwDown').textContent = '—';
+      document.getElementById('bwUp').textContent = '—';
+      toast('Dashboard load failed', 'err');
+      console.error('loadDashboard failed:', res.status, err);
+      return;
+    }
     const d = await res.json();
     const cpu = Math.round(d.cpu || 0);
     const ram = Math.round(d.ram_percent || 0);
@@ -54,7 +63,13 @@ async function loadDashboard() {
 
 async function loadUsers() {
   const res = await apiFetch('/api/users');
-  if (!res.ok) return;
+  if (!res.ok) {
+    const err = await res.text();
+    document.getElementById('usersBody').innerHTML = '<tr><td colspan="9" class="empty-state">Could not load users</td></tr>';
+    toast('Failed to load users', 'err');
+    console.error('loadUsers failed:', res.status, err);
+    return;
+  }
   const users = await res.json();
   document.getElementById('usersBody').innerHTML = users.map(u => `
     <tr style="cursor:pointer" onclick="openUserPanel('${u.username}')">
@@ -64,6 +79,7 @@ async function loadUsers() {
       <td><span class="badge ${u.temporary ? 'badge-temp' : 'badge-perm'}">${u.temporary ? 'Temp' : 'Perm'}</span></td>
       <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
       <td style="font-family:var(--font-mono);font-size:12px">${u.max_logins || '∞'}</td>
+      <td style="font-size:12px">${u.services && u.services.length ? u.services.join(', ') : '—'}</td>
       <td>
         <span class="conn-badge">
           <span class="conn-dot"></span>${u.connections || 0}
@@ -76,7 +92,7 @@ async function loadUsers() {
         </div>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="8" class="empty-state">No users found</td></tr>';
+  `).join('') || '<tr><td colspan="9" class="empty-state">No users found</td></tr>';
 }
 
 async function doSync() {
@@ -90,12 +106,17 @@ async function doSync() {
 async function doAddUser() {
   const days = parseInt(document.getElementById('nu_days').value);
   const maxl = parseInt(document.getElementById('nu_maxlogins').value);
+  const services = [];
+  if (document.getElementById('nu_svc_ssh').checked) services.push('ssh');
+  if (document.getElementById('nu_svc_zivpn').checked) services.push('zivpn');
+  if (document.getElementById('nu_svc_xray').checked) services.push('xray');
   const body = {
     username: document.getElementById('nu_username').value.trim(),
     password: document.getElementById('nu_password').value || null,
     days: isNaN(days) ? null : days,
     max_logins: isNaN(maxl) ? null : maxl,
-    temporary: document.getElementById('nu_temp').checked
+    temporary: document.getElementById('nu_temp').checked,
+    services: services.length > 0 ? services : null
   };
   if (!body.username) { toast('Username required', 'err'); return; }
   const res = await apiFetch('/api/users', { method: 'POST', body: JSON.stringify(body) });
@@ -107,6 +128,9 @@ async function doAddUser() {
   document.getElementById('nu_password').value = '';
   document.getElementById('nu_days').value = '';
   document.getElementById('nu_maxlogins').value = '';
+  document.getElementById('nu_svc_ssh').checked = true;
+  document.getElementById('nu_svc_zivpn').checked = true;
+  document.getElementById('nu_svc_xray').checked = true;
   document.getElementById('nu_temp').checked = false;
   loadUsers();
 }
@@ -137,6 +161,7 @@ async function openUserPanel(username) {
     <div class="info-item"><div class="lbl">Password</div><div class="val">${u.password}</div></div>
     <div class="info-item"><div class="lbl">Expiry</div><div class="val">${u.expires?u.expires.substring(0,10):'Never'}</div></div>
     <div class="info-item"><div class="lbl">Max Logins</div><div class="val">${u.max_logins||'∞'}</div></div>
+    <div class="info-item"><div class="lbl">Services</div><div class="val">${u.services && u.services.length ? u.services.join(', ') : '—'}</div></div>
     <div class="info-item"><div class="lbl">Connections</div><div class="val connections-val">${u.connections||0}</div></div>
   `;
   const isActive = u.status === 'Active';
@@ -145,6 +170,7 @@ async function openUserPanel(username) {
     <button class="btn-sm" onclick="openPwdModal('${u.username}')">🔑 Password</button>
     <button class="btn-sm" onclick="openExpiryModal('${u.username}')">📅 Expiry</button>
     <button class="btn-sm" onclick="openMaxlogModal('${u.username}',${u.max_logins||0})">🔒 Max Logins</button>
+    <button class="btn-sm" onclick="openServicesModal('${u.username}')">🔌 Services</button>
     <button class="btn-sm" onclick="doToggleTemp('${u.username}')">${isTemp?'→ Permanent':'→ Temporary'}</button>
     <button class="${isActive?'btn-danger':'btn-green'}" onclick="doToggleActive('${u.username}',${isActive})">
       ${isActive?'⏸ Deactivate':'▶ Activate'}
@@ -245,4 +271,95 @@ async function doToggleActive(username, isActive) {
   const ep = isActive ? 'deactivate' : 'activate';
   const res = await apiFetch(`/api/users/${username}/${ep}`, { method: 'POST' });
   if (res.ok) { toast(`${username} ${isActive ? 'deactivated' : 'activated'}`); openUserPanel(username); loadUsers(); }
+}
+
+// ── Services ─────────────────────────────────────────────────────────────────
+
+function openServicesModal(username) {
+  const u = currentPanelUser === username ? document.getElementById('panel_username').textContent : username;
+  document.getElementById('svc_username_lbl').textContent = u;
+  
+  // Fetch current services and update checkboxes
+  apiFetch(`/api/users/${u}`).then(r => r.json()).then(user => {
+    const svcs = new Set(user.services || []);
+    document.getElementById('svc_ssh').checked = svcs.has('ssh');
+    document.getElementById('svc_zivpn').checked = svcs.has('zivpn');
+    document.getElementById('svc_xray').checked = svcs.has('xray');
+  });
+  
+  openModal('servicesModal');
+}
+
+async function doSaveServices() {
+  const username = document.getElementById('svc_username_lbl').textContent;
+  const services = [];
+  if (document.getElementById('svc_ssh').checked) services.push('ssh');
+  if (document.getElementById('svc_zivpn').checked) services.push('zivpn');
+  if (document.getElementById('svc_xray').checked) services.push('xray');
+  
+  const res = await apiFetch(`/api/users/${username}/services`, {
+    method: 'POST',
+    body: JSON.stringify({ services })
+  });
+  const d = await res.json();
+  if (!res.ok) { toast(d.detail || 'Error', 'err'); return; }
+  toast(`Services updated → ${d.services.join(', ')}`);
+  closeModal('servicesModal');
+  if (currentPanelUser === username) openUserPanel(username);
+  loadUsers();
+}
+
+// ── Xray ─────────────────────────────────────────────────────────────────────
+
+async function loadXray() {
+  try {
+    const res = await apiFetch('/api/users');
+    if (!res.ok) {
+      const err = await res.text();
+      document.getElementById('xrayContent').innerHTML = `
+        <div class="card" style="text-align:center;padding:40px">
+          <p style="color:var(--text3)">Failed to load Xray users</p>
+        </div>
+      `;
+      toast('Xray page load failed', 'err');
+      console.error('loadXray failed:', res.status, err);
+      return;
+    }
+    const users = await res.json();
+    const xrayUsers = users.filter(u => u.services && u.services.includes('xray'));
+    
+    if (!xrayUsers.length) {
+      document.getElementById('xrayContent').innerHTML = `
+        <div class="card" style="text-align:center;padding:40px">
+          <p style="color:var(--text3)">No users with Xray service</p>
+        </div>
+      `;
+      return;
+    }
+    
+    document.getElementById('xrayContent').innerHTML = `
+      <div class="card">
+        <h4>Xray Users</h4>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Username</th><th>Status</th><th>Expiry</th><th>Connections</th>
+            </tr></thead>
+            <tbody>
+              ${xrayUsers.map(u => `
+                <tr>
+                  <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
+                  <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
+                  <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
+                  <td><span class="conn-badge"><span class="conn-dot"></span>${u.connections || 0}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    console.error('Xray load error', e);
+  }
 }

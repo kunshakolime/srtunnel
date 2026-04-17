@@ -1,0 +1,58 @@
+{
+  "log": {
+    "access": "/root/srtunnel/temp/access.log",
+    "error": "/root/srtunnel/temp/error.log",
+    "loglevel": "warning"
+  },
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "StatsService",
+      "LoggerService"
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "api",
+      "protocol": "dokodemo-door",
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "settings": {
+        "address": "127.0.0.1"
+      }
+    },
+    {
+      "tag": "xray-vless",
+      "protocol": "vless",
+      "listen": "0.0.0.0",
+      "port": 8445,
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "settings": {}
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["api"],
+        "outboundTag": "api"
+      }
+    ]
+  }
+}
