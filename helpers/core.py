@@ -1,8 +1,10 @@
-import sqlite3, datetime, random, string, os, shutil
+import sqlite3, datetime, random, string, os, shutil, logging
 from contextlib import contextmanager
 from pathlib import Path
 
 from helpers import system, zivpn, xray
+
+logger = logging.getLogger(__name__)
 
 # ── Config (set once by the host app) ────────────────────────────────────────
 
@@ -145,6 +147,8 @@ def sync():
     # ── Xray ─────────────────────────────────────────────────────────────────
     xray_ok = True
     xray_tag = _c("XRAY_INBOUND_TAG")
+    logger.info("sync: XRAY_INBOUND_TAG='%s', xray_users=%d", xray_tag, len(xray_active))
+    
     if xray_tag:
         # xray.sync_users_to_inbound will use username as email and handle protocol-specific fields
         xray_users = [
@@ -152,6 +156,8 @@ def sync():
             for u, d in xray_active.items()
         ]
         xray_ok = xray.sync_users_to_inbound(xray_tag, xray_users)
+    else:
+        logger.warning("sync: XRAY_INBOUND_TAG not configured, skipping xray sync")
 
     return {
         "success":       zivpn_ok and xray_ok,
