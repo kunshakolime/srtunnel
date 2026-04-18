@@ -32,8 +32,7 @@ telegram_bot:
   config_file: "./zivpn.json"
   default_password: "123"
   token: "${TOKEN}"
-  admin_ids:
-    - ${ID}
+  primary_url: "http://127.0.0.1:51700"
   domain: "${DOMAIN}"
   cf_root_domain: "example.com"   # ← root domain for DNS management
   cf_token: "..."
@@ -43,6 +42,9 @@ telegram_bot:
   interface: "${IFACE}"
   bandwidth_down: "${MY_SPEED}"
   bandwidth_up: "${MY_SPEED}"
+  xray_config: "/root/srtunnel/xray.json"
+  xray_binary: "/root/srtunnel/xray"
+  xray_inbound_tag: "xray-vless"
 websocket:
   # WebSocket Tunnel Server Configuration
   ports: # Port Configuration

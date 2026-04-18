@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from helpers.auth import verify_linux_login, create_token, get_current_user, store_token, revoke_token, list_tokens
-from helpers import core, system, dns, xray
+from helpers import core, system, dns, xray, files
 from helpers import speedtest as st
 from helpers import services as svc_helper
 import yaml, secrets, logging, traceback, time
@@ -67,6 +67,12 @@ def run_launch_commands():
 async def lifespan(app: FastAPI):
     logger.info("srapi starting up")
     run_launch_commands()
+    logger.info("syncing users to services")
+    try:
+        core.sync()
+        logger.info("initial sync completed")
+    except Exception as e:
+        logger.error("initial sync failed: %s", e)
     yield
     logger.info("srapi shutting down")
 
@@ -333,10 +339,8 @@ def remove_xray_inbound_user(tag: str, username: str, user: str = Depends(get_cu
 
 @app.get("/api/xray/users/{username}/stats")
 def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
-    stats = xray.get_user_stats(username)
-    if stats is None:
-        raise HTTPException(status_code=404, detail="Xray stats unavailable")
-    return stats
+    # Stats functionality removed to simplify Xray management
+    raise HTTPException(status_code=410, detail="Xray stats functionality has been removed")
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -479,6 +483,51 @@ def set_user_services(username: str, data: SetServicesRequest, user: str = Depen
     return {"username": username, "services": u.get("services", []) if u else []}
 
 
+# ── File Management ───────────────────────────────────────────────────────────
+
+ALLOWED_CONFIG_FILES = {
+    "xray.json",
+    "hysteria1.json",
+    "hysteria2.yaml",
+    "zivpn.json",
+    "stunnel.conf",
+    "config.yaml",
+    "udp-custom.json",
+    "websocket",
+    "bannerssh",
+}
+
+@app.get("/api/files/{filename}")
+def read_config_file(filename: str, user: str = Depends(get_current_user)):
+    if filename not in ALLOWED_CONFIG_FILES:
+        raise HTTPException(status_code=403, detail="Access denied to this file")
+    try:
+        content = files.read_file(filename)
+        return {"filename": filename, "content": content}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+
+@app.put("/api/files/{filename}")
+def write_config_file(filename: str, content: str = Body(...), user: str = Depends(get_current_user)):
+    if filename not in ALLOWED_CONFIG_FILES:
+        raise HTTPException(status_code=403, detail="Access denied to this file")
+    try:
+        files.write_file(filename, content)
+        logger.info("File updated: %s by %s", filename, user)
+        return {"filename": filename, "status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error writing file: {str(e)}")
+
+@app.get("/api/files/{filename}/exists")
+def check_file_exists(filename: str, user: str = Depends(get_current_user)):
+    if filename not in ALLOWED_CONFIG_FILES:
+        raise HTTPException(status_code=403, detail="Access denied to this file")
+    exists = files.file_exists(filename)
+    return {"filename": filename, "exists": exists}
+
+
 # ── Sync & System ─────────────────────────────────────────────────────────────
 
 @app.post("/api/sync")
@@ -548,6 +597,33 @@ def speedtest(user: str = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Speedtest error: {type(e).__name__}: {e}")
 
 
+# ── File Management ───────────────────────────────────────────────────────────
+
+@app.get("/api/files/{filename}")
+def read_file_endpoint(filename: str, user: str = Depends(get_current_user)):
+    try:
+        content = files.read_file(filename)
+        return {"filename": filename, "content": content}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+
+@app.put("/api/files/{filename}")
+def write_file_endpoint(filename: str, content: str = Body(...), user: str = Depends(get_current_user)):
+    try:
+        files.write_file(filename, content)
+        logger.info("File updated: %s by %s", filename, user)
+        return {"filename": filename, "status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error writing file: {str(e)}")
+
+@app.get("/api/files/{filename}/exists")
+def check_file_exists_endpoint(filename: str, user: str = Depends(get_current_user)):
+    exists = files.file_exists(filename)
+    return {"filename": filename, "exists": exists}
+
+
 # ── Services (tmux) ───────────────────────────────────────────────────────────
 
 class ServiceStatusRequest(BaseModel):
@@ -605,6 +681,18 @@ def stop_service(name: str, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail=detail)
     logger.info("Service stopped: %s by %s", name, user)
     return {"service": name, "status": detail}
+
+@app.post("/api/services/{name}/reload")
+def reload_service(name: str, user: str = Depends(get_current_user)):
+    ok, detail = svc_helper.watcher.reload_service(name)
+    if not ok:
+        logger.warning("reload_service failed: %s — %s", name, detail)
+        raise HTTPException(status_code=404, detail=detail)
+    
+    # Determine if it was a reload or restart
+    action = "reloaded" if "reloaded" in detail else "restarted"
+    logger.info("Service %s: %s by %s — %s", action, name, user, detail)
+    return {"service": name, "action": action, "status": detail}
 
 @app.post("/api/services/{name}/restart")
 def restart_service(name: str, user: str = Depends(get_current_user)):
@@ -692,7 +780,6 @@ def dns_delete(record_id: str, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Could not delete record")
     logger.info("DNS record deleted: %s by %s", record_id, user)
     return {"status": "deleted"}
-
 
 if __name__ == "__main__":
     import uvicorn

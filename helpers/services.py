@@ -87,6 +87,31 @@ def _start_session(s: Service):
 def _stop_session(name: str):
     _tmux("kill-session", "-t", name)
 
+def _reload_session(name: str):
+    """Send SIGHUP to the process in the tmux session to reload it."""
+    try:
+        # Get the PID of the process in the tmux session
+        p = subprocess.run(
+            ["tmux", "list-panes", "-t", name, "-F", "#{pane_pid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        if p.returncode != 0:
+            return False, "could not get pane PID"
+        
+        pane_pid = p.stdout.strip()
+        if not pane_pid:
+            return False, "no pane PID found"
+        
+        # Send SIGHUP to reload the process
+        p = subprocess.run(["kill", "-HUP", pane_pid], 
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if p.returncode == 0:
+            return True, f"reload signal sent to PID {pane_pid}"
+        else:
+            return False, f"reload signal failed for PID {pane_pid}"
+    except Exception as e:
+        return False, f"reload error: {e}"
+
 def _capture_pane(name: str, lines: int) -> List[str]:
     p = subprocess.run(
         ["tmux", "capture-pane", "-t", f"{name}:0.0", "-p", "-S", f"-{lines}"],
@@ -193,6 +218,24 @@ class _Watcher:
             return False, "service not found"
         _stop_session(name)
         return True, "stopped"
+
+    def reload_service(self, name: str):
+        """Reload a service by sending SIGHUP, or restart if reload fails."""
+        with self._lock:
+            s = next((x for x in self._services if x.name == name), None)
+        if not s:
+            return False, "service not found"
+        
+        # First try to reload by sending SIGHUP
+        success, msg = _reload_session(name)
+        if success:
+            return True, f"reloaded ({msg})"
+        
+        # If reload fails, fall back to restart
+        _stop_session(name)
+        time.sleep(0.5)  # Brief pause
+        _start_session(s)
+        return True, "restarted (reload not supported)"
 
     def set_status(self, name: str, new_status: str):
         if new_status not in ("enable", "keep", "disable"):

@@ -95,6 +95,7 @@ envsubst < config.template.yaml > config.yaml
 # ── Setup Nginx ─────────────────────────────────────────────────────────────
 envsubst '$DOMAIN' < srtdash.template > /etc/nginx/sites-available/srtdash
 
+envsubst '$DOMAIN' < xray.template.json > xray.json
 
 
 ln -sf /etc/nginx/sites-available/srtdash /etc/nginx/sites-enabled/srtdash

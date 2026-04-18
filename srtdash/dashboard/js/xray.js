@@ -31,12 +31,6 @@ const XrayAPI = {
       method: 'DELETE'
     });
     return res.ok;
-  },
-
-  // Get stats for a user
-  async getUserStats(username) {
-    const res = await apiFetch(`/api/xray/users/${username}/stats`);
-    return res.ok ? res.json() : null;
   }
 };
 
