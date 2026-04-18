@@ -713,12 +713,13 @@ async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  #
 
     elif data.startswith("svc_detail_"):
         name = data[11:]
-        r    = await api_get(server, "/api/services")
+        r    = await api_get(server, "/api/services?lines=20")
         svcs = r.get("services", []) if isinstance(r, dict) else []
         svc  = next((s for s in svcs if s.get("name") == name),
                     {"name": name, "running": False})
         icon = "🟢" if svc.get("running") else "🔴"
-        logs = (svc.get("log_tail") or svc.get("output") or "No logs")[-800:]
+        logs_arr = svc.get("log") or []
+        logs = '\n'.join(logs_arr)[-800:] if logs_arr else "No logs"
         await q.edit_message_text(
             f"*{icon} {name}*\n\n```\n{logs}\n```", parse_mode="Markdown",
             reply_markup=kb([("▶️ Start",    f"svc_start_{name}"),
