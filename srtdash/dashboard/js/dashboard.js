@@ -412,17 +412,12 @@ async function editXrayConfig() {
   modal.id = uniqueId;
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content" style="width:90%; max-width:1200px; height:80vh; display:flex; flex-direction:column;">
-      <div class="modal-header">
-        <h3>Edit Xray Config</h3>
-        <button class="modal-close" onclick="closeXrayModal('${uniqueId}')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <textarea id="xrayConfigEditor-${uniqueId}" style="width:100%; flex-grow:1; min-height:500px; font-family:monospace; font-size:13px; padding:15px; resize:none;">${data.content}</textarea>
-      </div>
+    <div class="modal-box" style="max-width:900px; max-height:90vh;">
+      <h4>Edit Xray Config</h4>
+      <textarea id="xrayConfigEditor-${uniqueId}" style="width:100%; height:60vh; font-family:var(--font-mono); font-size:13px; padding:15px; resize:none;">${data.content}</textarea>
       <div class="modal-footer">
+        <button class="btn-sm" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
         <button class="btn" onclick="saveXrayConfig('${uniqueId}')">Save</button>
-        <button class="btn-secondary" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
       </div>
     </div>
   `;
@@ -470,6 +465,52 @@ function closeXrayModal(id) {
   }
 }
 
+function toggleTLSFields(uniqueId, network) {
+  const tlsFields = document.getElementById('tlsFields-' + uniqueId);
+  const wsRow = document.getElementById('wsRow-' + uniqueId);
+  const wsRowPath = document.getElementById('wsRowPath-' + uniqueId);
+
+  tlsFields.style.display = 'none';
+  wsRow.style.display = 'none';
+  wsRowPath.style.display = 'none';
+
+  if (network === 'tcp') {
+    clearWSFields(uniqueId);
+  } else if (network === 'ws') {
+    wsRow.style.display = 'block';
+    wsRowPath.style.display = 'block';
+  }
+  toggleSecurity(uniqueId);
+}
+
+function toggleSecurity(uniqueId) {
+  const tlsCheck = document.getElementById('inboundTLS-' + uniqueId);
+  const tlsFields = document.getElementById('tlsFields-' + uniqueId);
+  if (tlsCheck && tlsCheck.checked) {
+    tlsFields.style.display = 'block';
+  } else {
+    tlsFields.style.display = 'none';
+  }
+}
+
+function clearTLSFields(uniqueId) {
+  const sni = document.getElementById('inboundSNI-' + uniqueId);
+  const cert = document.getElementById('inboundCert-' + uniqueId);
+  const key = document.getElementById('inboundKey-' + uniqueId);
+  const alpn = document.getElementById('inboundALPN-' + uniqueId);
+  if (sni) sni.value = '';
+  if (cert) cert.value = '/root/srtunnel/server.crt';
+  if (key) key.value = '/root/srtunnel/server.key';
+  if (alpn) alpn.value = 'h2, http/1.1';
+}
+
+function clearWSFields(uniqueId) {
+  const wsHost = document.getElementById('inboundWSHost-' + uniqueId);
+  const wsPath = document.getElementById('inboundWSPath-' + uniqueId);
+  if (wsHost) wsHost.value = '';
+  if (wsPath) wsPath.value = '';
+}
+
 async function addXrayInbound() {
   const uniqueId = 'addInboundModal-' + Date.now();
   const modal = document.createElement('div');
@@ -480,7 +521,7 @@ async function addXrayInbound() {
       <h4>Add Xray Inbound</h4>
       <div class="form-row">
         <label>Tag</label>
-        <input type="text" id="inboundTag-${uniqueId}" placeholder="e.g., vless-inbound">
+        <input type="text" id="inboundTag-${uniqueId}" placeholder="e.g., xray-vless">
       </div>
       <div class="form-row">
         <label>Protocol</label>
@@ -491,12 +532,49 @@ async function addXrayInbound() {
         </select>
       </div>
       <div class="form-row">
+        <label>Listen</label>
+        <input type="text" id="inboundListen-${uniqueId}" value="0.0.0.0" style="font-family:var(--font-mono)">
+      </div>
+      <div class="form-row">
         <label>Port</label>
         <input type="number" id="inboundPort-${uniqueId}" placeholder="443">
       </div>
       <div class="form-row">
-        <label>Listen Address</label>
-        <input type="text" id="inboundListen-${uniqueId}" value="0.0.0.0">
+        <label>Network</label>
+        <select id="inboundNetwork-${uniqueId}" onchange="toggleTLSFields('${uniqueId}', this.value)">
+          <option value="tcp">TCP</option>
+          <option value="ws">WebSocket</option>
+        </select>
+      </div>
+      <div class="toggle-row">
+        <span>TLS</span>
+        <label class="toggle"><input type="checkbox" id="inboundTLS-${uniqueId}" onchange="toggleSecurity('${uniqueId}')"><span class="toggle-slider"></span></label>
+      </div>
+      <div id="tlsFields-${uniqueId}" style="display:none">
+        <div class="form-row">
+          <label>SNI / Server Name</label>
+          <input type="text" id="inboundSNI-${uniqueId}" placeholder="e.g., mydomain.com">
+        </div>
+        <div class="form-row">
+          <label>Cert Path</label>
+          <input type="text" id="inboundCert-${uniqueId}" value="/root/srtunnel/server.crt" style="font-family:var(--font-mono)">
+        </div>
+        <div class="form-row">
+          <label>Key Path</label>
+          <input type="text" id="inboundKey-${uniqueId}" value="/root/srtunnel/server.key" style="font-family:var(--font-mono)">
+        </div>
+        <div class="form-row">
+          <label>ALPN</label>
+          <input type="text" id="inboundALPN-${uniqueId}" value="h2, http/1.1" placeholder="h2, http/1.1" style="font-family:var(--font-mono)">
+        </div>
+      </div>
+      <div class="form-row" id="wsRow-${uniqueId}" style="display:none">
+        <label>WebSocket Host</label>
+        <input type="text" id="inboundWSHost-${uniqueId}" placeholder="e.g., mydomain.com">
+      </div>
+      <div class="form-row" id="wsRowPath-${uniqueId}" style="display:none">
+        <label>WebSocket Path</label>
+        <input type="text" id="inboundWSPath-${uniqueId}" placeholder="e.g., /kun">
       </div>
       <div class="modal-footer">
         <button class="btn-sm" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
@@ -507,23 +585,79 @@ async function addXrayInbound() {
   document.body.appendChild(modal);
   modal.classList.add('open');
   modal.addEventListener('click', e => { if (e.target === modal) closeXrayModal(uniqueId); });
+
+  // Initialize TLS fields visibility based on default network
+  const defaultNetwork = document.getElementById('inboundNetwork-' + uniqueId).value;
+  toggleTLSFields(uniqueId, defaultNetwork);
 }
 
 async function doAddInbound(modalId) {
-  const inbound = {
-    tag: document.getElementById('inboundTag-' + modalId).value.trim(),
-    protocol: document.getElementById('inboundProtocol-' + modalId).value,
-    port: parseInt(document.getElementById('inboundPort-' + modalId).value),
-    listen: document.getElementById('inboundListen-' + modalId).value,
-    settings: {},
-    streamSettings: {}
-  };
-  
-  if (!inbound.tag || !inbound.port) {
+  const tag = document.getElementById('inboundTag-' + modalId).value.trim();
+  const protocol = document.getElementById('inboundProtocol-' + modalId).value;
+  const listen = document.getElementById('inboundListen-' + modalId).value.trim();
+  const port = parseInt(document.getElementById('inboundPort-' + modalId).value);
+  const network = document.getElementById('inboundNetwork-' + modalId).value;
+
+  const tlsEl = document.getElementById('inboundTLS-' + modalId);
+  const useTLS = tlsEl ? tlsEl.checked : false;
+  const sniEl = document.getElementById('inboundSNI-' + modalId);
+  const sni = sniEl ? sniEl.value.trim() : '';
+  const certEl = document.getElementById('inboundCert-' + modalId);
+  const certPath = certEl ? certEl.value.trim() : '';
+  const keyEl = document.getElementById('inboundKey-' + modalId);
+  const keyPath = keyEl ? keyEl.value.trim() : '';
+  const wsHostEl = document.getElementById('inboundWSHost-' + modalId);
+  const wsHost = wsHostEl ? wsHostEl.value.trim() : '';
+  const wsPathEl = document.getElementById('inboundWSPath-' + modalId);
+  const wsPath = wsPathEl ? wsPathEl.value.trim() : '';
+  const alpnEl = document.getElementById('inboundALPN-' + modalId);
+  const alpn = alpnEl ? alpnEl.value.trim() : '';
+
+  if (!tag || !port) {
     toast('Tag and port required', 'err');
     return;
   }
-  
+
+  const inbound = {
+    tag: tag,
+    protocol: protocol,
+    listen: listen,
+    port: port,
+    settings: {
+      clients: [],
+      decryption: 'none',
+      encryption: 'none'
+    }
+  };
+
+  const streamSettings = { network: network };
+  const wsSettings = {};
+
+  const wsRowVisible = document.getElementById('wsRow-' + modalId)?.style.display !== 'none';
+  if (network === 'ws' && wsRowVisible) {
+    if (wsHost) wsSettings.host = wsHost;
+    if (wsPath) wsSettings.path = wsPath;
+    if (Object.keys(wsSettings).length) streamSettings.wsSettings = wsSettings;
+  }
+
+  const tlsFieldsVisible = document.getElementById('tlsFields-' + modalId)?.style.display !== 'none';
+
+  if (useTLS && tlsFieldsVisible) {
+    streamSettings.security = 'tls';
+    streamSettings.tlsSettings = {
+      alpn: alpn ? alpn.split(',').map(x => x.trim()).filter(x => x) : ['h2', 'http/1.1'],
+      certificates: [{
+        certificateFile: certPath || '/root/srtunnel/server.crt',
+        keyFile: keyPath || '/root/srtunnel/server.key'
+      }],
+      minVersion: '1.2',
+      maxVersion: '1.3'
+    };
+    if (sni) streamSettings.tlsSettings.serverName = sni;
+  }
+
+  inbound.streamSettings = streamSettings;
+
   const res = await apiFetch('/api/xray/inbounds', {
     method: 'POST',
     body: JSON.stringify(inbound)
