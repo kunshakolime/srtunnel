@@ -1,4 +1,4 @@
-import sqlite3, datetime, random, string, os, shutil, logging
+import sqlite3, datetime, random, string, os, shutil, logging, uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -62,7 +62,8 @@ def init_db():
             expires_at  TEXT,
             temporary   INTEGER DEFAULT 0,
             max_logins  INTEGER DEFAULT NULL,
-            services    TEXT    DEFAULT NULL
+            services    TEXT    DEFAULT NULL,
+            uuid        TEXT    DEFAULT NULL
         )''')
 
         # Migration: add services column to existing databases
@@ -72,6 +73,15 @@ def init_db():
             c.execute("ALTER TABLE users ADD COLUMN services TEXT DEFAULT NULL")
             # Existing users were ssh+zivpn only (xray didn't exist yet)
             c.execute("UPDATE users SET services = 'ssh,zivpn' WHERE services IS NULL")
+        
+        # Migration: add uuid column to existing databases
+        if "uuid" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN uuid TEXT DEFAULT NULL")
+            # Generate UUIDs for existing users
+            import uuid
+            c.execute("SELECT id FROM users WHERE uuid IS NULL")
+            for (user_id,) in c.fetchall():
+                c.execute("UPDATE users SET uuid = ? WHERE id = ?", (str(uuid.uuid4()), user_id))
 
 
 # ── Sync ──────────────────────────────────────────────────────────────────────
@@ -109,13 +119,13 @@ def sync():
 
         # ── Active users with their service tags ──────────────────────────────
         c.execute(
-            "SELECT username, password, max_logins, services "
+            "SELECT username, password, max_logins, services, uuid "
             "FROM users WHERE expires_at IS NULL OR expires_at > ?",
             (now,),
         )
         active = {
-            u: {"password": p, "max_logins": m, "services": _unpack_services(s)}
-            for u, p, m, s in c.fetchall()
+            u: {"password": p, "max_logins": m, "services": _unpack_services(s), "uuid": uuid_val}
+            for u, p, m, s, uuid_val in c.fetchall()
         }
 
     # ── SSH cleanup ───────────────────────────────────────────────────────────
@@ -150,9 +160,9 @@ def sync():
     logger.info("sync: XRAY_INBOUND_TAG='%s', xray_users=%d", xray_tag, len(xray_active))
     
     if xray_tag:
-        # xray.sync_users_to_inbound will use username as email and handle protocol-specific fields
+        # xray.sync_users_to_inbound uses username as email and uuid from database
         xray_users = [
-            {"username": u, "password": d["password"], "uid": None}
+            {"username": u, "password": d["password"], "uid": d["uuid"]}
             for u, d in xray_active.items()
         ]
         xray_ok = xray.sync_users_to_inbound(xray_tag, xray_users)
@@ -200,6 +210,7 @@ def add_user(username, password=None, days=None, temporary=False, max_logins=Non
     """
     svc_str = _pack_services(services)
     svc_set = _unpack_services(svc_str)
+    user_uuid = str(uuid.uuid4())
 
     created = datetime.datetime.now()
     expires = (created + datetime.timedelta(days=days)).isoformat() if days else None
@@ -214,9 +225,9 @@ def add_user(username, password=None, days=None, temporary=False, max_logins=Non
         try:
             c.execute(
                 "INSERT INTO users "
-                "(username, password, created_at, expires_at, temporary, max_logins, services) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (username, password, created.isoformat(), expires, int(temporary), max_logins, svc_str),
+                "(username, password, created_at, expires_at, temporary, max_logins, services, uuid) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (username, password, created.isoformat(), expires, int(temporary), max_logins, svc_str, user_uuid),
             )
             c.connection.commit()
         except sqlite3.IntegrityError:
@@ -257,13 +268,13 @@ def delete_user(username):
 def get_users(filter_status=None):
     with db_conn(commit=False) as c:
         c.execute(
-            "SELECT username, password, created_at, expires_at, temporary, max_logins, services "
+            "SELECT username, password, created_at, expires_at, temporary, max_logins, services, uuid "
             "FROM users ORDER BY created_at DESC"
         )
         rows = c.fetchall()
     now = datetime.datetime.now()
     result = []
-    for username, password, created, expires, temporary, max_logins, services in rows:
+    for username, password, created, expires, temporary, max_logins, services, user_uuid in rows:
         status = "Active" if not expires or datetime.datetime.fromisoformat(expires) > now else "Expired"
         if filter_status and status != filter_status:
             continue
@@ -276,6 +287,7 @@ def get_users(filter_status=None):
             max_logins=max_logins,
             services=sorted(_unpack_services(services)),
             status=status,
+            uuid=user_uuid,
         ))
     return result
 
@@ -283,14 +295,14 @@ def get_users(filter_status=None):
 def get_user(username):
     with db_conn(commit=False) as c:
         c.execute(
-            "SELECT username, password, created_at, expires_at, temporary, max_logins, services "
+            "SELECT username, password, created_at, expires_at, temporary, max_logins, services, uuid "
             "FROM users WHERE username=?",
             (username,),
         )
         row = c.fetchone()
     if not row:
         return None
-    username, password, created, expires, temporary, max_logins, services = row
+    username, password, created, expires, temporary, max_logins, services, user_uuid = row
     status = "Active" if not expires or datetime.datetime.fromisoformat(expires) > datetime.datetime.now() else "Expired"
     return dict(
         username=username,
@@ -301,7 +313,16 @@ def get_user(username):
         max_logins=max_logins,
         services=sorted(_unpack_services(services)),
         status=status,
+        uuid=user_uuid,
     )
+
+
+def get_user_uuid(username):
+    """Get the UUID for a specific user."""
+    with db_conn(commit=False) as c:
+        c.execute("SELECT uuid FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+    return row[0] if row else None
 
 
 @_auto_sync

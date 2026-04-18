@@ -1,141 +1,333 @@
 #!/root/srtunnel/venv/bin/python
+"""
+Telegram VPN Management Bot — multi-server edition
+====================================================
 
-import asyncio, os, shutil, subprocess, logging
-from pathlib import Path
+Auth flow
+---------
+1. User sends /login  →  bot asks for Linux username + password
+2. Bot calls POST /api/login on the primary srapi  →  gets a bearer token
+   The Telegram user-id is remembered in-process (no admin_ids config needed).
+3. Bot calls GET /api/serverlist  →  discovers all registered remote servers
+   (each entry already carries its own {url, token} for direct API calls).
+4. User picks the active server; all subsequent calls go directly to that
+   server's API using its stored token.
 
+Only two values live in config.yaml: the bot token and the primary API URL.
+"""
+
+import asyncio, logging, io, json as _json
+from typing import Optional
+
+import aiohttp
 import yaml
+from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters,
+)
 
-from helpers import system
-from helpers import core
-from helpers import dns
-from helpers import speedtest as st
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger("srbot")
+
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-def load_config():
+def load_config() -> dict:
     path = Path("config.yaml")
     if not path.exists():
         raise RuntimeError(f"Missing config file: {path}")
-    app = (yaml.safe_load(path.read_text()) or {}).get("telegram_bot", {})
+    raw = yaml.safe_load(path.read_text()) or {}
+    bot = raw.get("telegram_bot", {})
     return {
-        "DB_FILE":          app.get("db_file", "users.db"),
-        "CONFIG_FILE":      app.get("config_file", "./zivpn.json"),
-        "DEFAULT_PASSWORD": app.get("default_password", "123"),
-        "TOKEN":            app.get("token"),
-        "ADMIN_IDS":        app.get("admin_ids", []),
-        "DOMAIN":           app.get("domain", ""),
-        "DNSTT":            app.get("dnstt", ""),
-        "KEY":              app.get("slowdnskey", ""),
-        "IFACE":            app.get("interface", "eth0"),
-        "BW_DOWN":          app.get("bandwidth_down", ""),
-        "BW_UP":            app.get("bandwidth_up", ""),
-        # ── DNS / Cloudflare (new) ─────────────────────────────────────────
-        "CF_TOKEN":         app.get("cf_token", ""),
-        "CF_ZONE":          app.get("cf_zone",  ""),
-        "CF_ROOT_DOMAIN": app.get("cf_root_domain", ""),
+        "TOKEN":       bot.get("token"),
+        "PRIMARY_URL": bot.get("primary_url", "http://127.0.0.1:51700"),
     }
 
-cfg = load_config()
-core.init(cfg)   # share config with core
-dns.init(cfg)    # share config with dns helper
-
-TOKEN     = cfg["TOKEN"]
-ADMIN_IDS = cfg["ADMIN_IDS"]
-DOMAIN    = cfg["DOMAIN"]
-DNSTT     = cfg["DNSTT"]
-KEY       = cfg["KEY"]
-IFACE     = cfg["IFACE"]
-BW_DOWN   = cfg["BW_DOWN"]
-BW_UP     = cfg["BW_UP"]
-
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+cfg         = load_config()
+BOT_TOKEN   = cfg["TOKEN"]
+PRIMARY_URL = cfg["PRIMARY_URL"].rstrip("/")
 
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-def is_admin(user_id):  return user_id in ADMIN_IDS
-
-async def check_admin(update: Update):
-    uid = update.effective_user.id if update.effective_user else None
-    if not uid or not is_admin(uid):
-        if update.message:
-            await update.message.reply_text("⛔ Unauthorized")
-        return False
-    return True
+# ── Per-user session store ────────────────────────────────────────────────────
+# Keyed by Telegram user_id (int).
+# Each entry: {
+#   "primary_token": str,     # bearer token for the primary srapi
+#   "servers":       list,    # [{id, name, url, token}, …] from /api/serverlist
+#   "active_id":     str,     # currently selected server id
+# }
+_sessions: dict[int, dict] = {}
 
 
-# ── UI helpers ────────────────────────────────────────────────────────────────
+def get_session(uid: int) -> Optional[dict]:
+    return _sessions.get(uid)
 
-def fmt_user(user):
-    icon    = "✅" if user["status"] == "Active" else "❌"
-    expires = user["expires"][:10] if user["expires"] else "Never"
-    conns   = system.user_connections(user["username"])
-    limit   = f"/{user['max_logins']}" if user["max_logins"] else "/∞"
-    return (
-        f"{icon} *{user['username']}*\n\n"
-        f"`{user['password']}`\n"
-        f"Expires: {expires}\n"
-        f"{'Temporary' if user['temporary'] else 'Permanent'}\n"
-        f"Connections: {conns}{limit}"
+
+def set_session(uid: int, data: dict):
+    _sessions[uid] = data
+
+
+def clear_session(uid: int):
+    _sessions.pop(uid, None)
+
+
+def active_server(uid: int) -> Optional[dict]:
+    sess = get_session(uid)
+    if not sess:
+        return None
+    aid     = sess.get("active_id")
+    servers = sess.get("servers", [])
+    if aid:
+        s = next((s for s in servers if s["id"] == aid), None)
+        if s:
+            return s
+    return servers[0] if servers else None
+
+
+def primary_server(uid: int) -> Optional[dict]:
+    """Synthetic server entry that always talks to the primary node."""
+    sess = get_session(uid)
+    if not sess:
+        return None
+    return {"id": "__primary__", "name": "Primary",
+            "url": PRIMARY_URL, "token": sess["primary_token"]}
+
+
+# ── API client ────────────────────────────────────────────────────────────────
+
+class ApiError(Exception):
+    def __init__(self, status: int, detail: str):
+        self.status = status
+        self.detail = detail
+        super().__init__(f"HTTP {status}: {detail}")
+
+
+async def _req(method: str, server: dict, path: str, **kwargs):
+    url     = server["url"].rstrip("/") + path
+    headers = {"Authorization": f"Bearer {server['token']}"}
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as sess:
+        async with sess.request(method, url, headers=headers, **kwargs) as r:
+            if r.content_type and "octet-stream" in r.content_type:
+                return await r.read()
+            body = await r.json(content_type=None)
+            if r.status >= 400:
+                detail = body.get("detail", str(body)) if isinstance(body, dict) else str(body)
+                raise ApiError(r.status, detail)
+            return body
+
+
+async def api_get   (sv, path, **kw): return await _req("GET",    sv, path, **kw)
+async def api_post  (sv, path, **kw): return await _req("POST",   sv, path, **kw)
+async def api_put   (sv, path, **kw): return await _req("PUT",    sv, path, **kw)
+async def api_delete(sv, path, **kw): return await _req("DELETE", sv, path, **kw)
+
+
+async def do_login(url: str, username: str, password: str) -> str:
+    """POST /api/login → bearer token, raises ApiError on failure."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as sess:
+        async with sess.post(f"{url.rstrip('/')}/api/login",
+                             json={"username": username, "password": password,
+                                   "label": "telegram-bot"}) as r:
+            body = await r.json(content_type=None)
+            if r.status >= 400:
+                raise ApiError(r.status, body.get("detail", "Login failed"))
+            return body["token"]
+
+
+async def fetch_serverlist(primary_token: str) -> list[dict]:
+    sv = {"url": PRIMARY_URL, "token": primary_token}
+    result = await api_get(sv, "/api/serverlist")
+    return result if isinstance(result, list) else []
+
+
+# ── Keyboard helpers ──────────────────────────────────────────────────────────
+
+def kb(*rows: list[tuple]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(l, callback_data=d) for l, d in row] for row in rows]
     )
 
+def kb_menu():    return kb([("🔙 Menu",       "back_to_menu")])
+def kb_users():   return kb([("🔙 Users",      "manage_users")])
+def kb_svc():     return kb([("🔙 Services",   "services_menu")])
+def kb_dns():     return kb([("🔙 DNS",        "dns_menu")])
+def kb_xray():    return kb([("🔙 Xray",       "xray_menu")])
+def kb_files():   return kb([("🔙 Files",      "file_manager")])
+def kb_scope():   return kb([("🔙 Scope",      "scope_menu")])
+def kb_srvlist(): return kb([("🔙 Serverlist", "serverlist_menu")])
+def kb_tokens():  return kb([("🔙 Tokens",     "tokens_menu")])
 
-def menu_text(live="normal"):
-    ip   = system.public_ip()
-    info = system.system_info()
-    bw   = system.bandwidth_usage(IFACE)
-    users  = core.get_users()
-    active = sum(1 for u in users if u["status"] == "Active")
-    conns  = system.total_connections()
 
-    def fmt_gb(v): return f"{int(v*1024)}mb" if v < 1 else f"{v:.1f}GB"
+def build_main_kb(multi: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if multi:
+        rows.append([InlineKeyboardButton("🖥 Switch Server", callback_data="switch_server")])
+    rows += [
+        [InlineKeyboardButton("➕ Add User",    callback_data="add_user"),
+         InlineKeyboardButton("📋 Users",       callback_data="manage_users")],
+        [InlineKeyboardButton("🔄 Sync",        callback_data="sync_now"),
+         InlineKeyboardButton("🎯 Services",    callback_data="services_menu")],
+        [InlineKeyboardButton("🚀 Speed Test",  callback_data="speedtest"),
+         InlineKeyboardButton("💾 Backup",      callback_data="backup_menu")],
+        [InlineKeyboardButton("🌐 DNS",         callback_data="dns_menu"),
+         InlineKeyboardButton("📁 Files",       callback_data="file_manager")],
+        [InlineKeyboardButton("⚡ Xray",        callback_data="xray_menu"),
+         InlineKeyboardButton("🔧 Scope",       callback_data="scope_menu")],
+        [InlineKeyboardButton("🖧 Serverlist",  callback_data="serverlist_menu"),
+         InlineKeyboardButton("🔑 Tokens",      callback_data="tokens_menu")],
+        [InlineKeyboardButton("⚡ Refresh",     callback_data="menu_refresh")],
+    ]
+    return InlineKeyboardMarkup(rows)
 
-    lines = ["🤖 *VPN User Management Bot*", "☠ @kunshakolime", f"🌐 Server: `{ip}`"]
-    if DOMAIN: lines.append(f"🔗 Domain: `{DOMAIN}`")
-    if DNSTT:  lines.append(f"📡 DNSTT: `{DNSTT}`")
-    if KEY:
-        try:    key_val = Path(KEY).read_text().strip() if os.path.exists(KEY) else KEY
-        except: key_val = KEY
-        lines.append(f"🔑 Key: `{key_val}`")
+
+# ── Menu text ─────────────────────────────────────────────────────────────────
+
+async def menu_text(server: dict, live="normal") -> str:
+    try:
+        info = await api_get(server, "/api/system")
+    except ApiError as e:
+        return f"⚠️ *{server['name']}*\n\nAPI unreachable:\n`{e.detail}`"
+    except Exception as e:
+        return f"⚠️ *{server['name']}*\n\n`{e}`"
+
+    def fmt_gb(v):
+        if v is None: return "?"
+        return f"{int(v*1024)}MB" if v < 1 else f"{v:.1f}GB"
+
+    bw    = info.get("bandwidth") or {}
+    lines = [f"🤖 *{server['name']}*", f"🌐 `{info.get('ip','?')}`"]
     if bw:
-        dl = f'`{bw["rx"]}`' + (f" / {BW_DOWN}" if BW_DOWN else "")
-        ul = f'`{bw["tx"]}`' + (f" / {BW_UP}"   if BW_UP   else "")
-        lines += [f"⬇️ {dl}", f"⬆️ {ul}"]
-    if info:
-        lines += [
-            f"💻 CPU: {info['cpu']:.0f}%",
-            f"🧠 RAM: {fmt_gb(info['ram_used'])}/{int(round(info['ram_total']))}GB • {info['ram_percent']:.0f}%",
-            f"💾 Disk: {fmt_gb(info['disk_used'])}/{int(round(info['disk_total']))}GB • {info['disk_percent']:.0f}%",
-        ]
-    lines += [f"👥 Users: {active}/{len(users)} active", f"🔌 Connections: {conns}"]
+        lines += [f"⬇️ `{bw.get('rx','?')}`", f"⬆️ `{bw.get('tx','?')}`"]
+
+    cpu = info.get("cpu");    ru = info.get("ram_used"); rt = info.get("ram_total")
+    rp  = info.get("ram_percent"); du = info.get("disk_used")
+    dt  = info.get("disk_total"); dp = info.get("disk_percent")
+    if cpu is not None: lines.append(f"💻 CPU: {cpu:.0f}%")
+    if ru  is not None: lines.append(f"🧠 RAM: {fmt_gb(ru)}/{int(round(rt or 0))}GB • {rp:.0f}%")
+    if du  is not None: lines.append(f"💾 Disk: {fmt_gb(du)}/{int(round(dt or 0))}GB • {dp:.0f}%")
+
+    try:
+        users  = await api_get(server, "/api/users")
+        active = sum(1 for u in users if u.get("status") == "Active")
+        lines += [f"👥 Users: {active}/{len(users)} active",
+                  f"🔌 Connections: {info.get('connections', 0)}"]
+    except Exception:
+        pass
+
     lines.append("\n⚡ _Fast refresh_" if live == "fast" else "\n🔄 _Auto-refresh_")
     return "\n".join(lines)
 
 
-def kb_main():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Add User",         callback_data="add_user"),
-         InlineKeyboardButton("📋 Manage Users",     callback_data="manage_users")],
-        [InlineKeyboardButton("🔄 Sync Now",         callback_data="sync_now"),
-         InlineKeyboardButton("🎯 Services",         callback_data="shoot_server")],
-        [InlineKeyboardButton("🚀 Speed Test",       callback_data="speedtest"),
-         InlineKeyboardButton("💾 Backup / Restore", callback_data="backup_menu")],
-        [InlineKeyboardButton("🌐 DNS Manager",      callback_data="dns_menu")],
-        [InlineKeyboardButton("⚡ Refresh",          callback_data="menu_refresh")],
-    ])
+# ── show_menu ─────────────────────────────────────────────────────────────────
 
-def kb_menu():  return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu",  callback_data="back_to_menu")]])
-def kb_users(): return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Users", callback_data="manage_users")]])
+def _cancel_menu_task(context: ContextTypes.DEFAULT_TYPE):
+    t = context.user_data.pop("menu_task", None)
+    if t and not t.done():
+        t.cancel()
 
-def kb_user_actions(username, is_temporary, is_active):
+
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                    notice: str = "", fast_burst: bool = False):
+    _cancel_menu_task(context)
+    context.user_data.clear()
+
+    uid  = update.effective_user.id
+    sess = get_session(uid)
+
+    if not sess:
+        text   = "👋 *Welcome!*\n\nUse /login to authenticate."
+        markup = kb([("🔐 Login", "login_start")])
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, parse_mode="Markdown",
+                                                          reply_markup=markup)
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
+        return
+
+    server = active_server(uid)
+    multi  = len(sess.get("servers", [])) > 1
+    mode   = "fast" if fast_burst else "normal"
+    initial = (f"{notice}\n\n" if notice else "") + await menu_text(server, live=mode)
+    markup  = build_main_kb(multi=multi)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(initial, parse_mode="Markdown",
+                                                      reply_markup=markup)
+        chat_id = update.callback_query.message.chat_id
+        msg_id  = update.callback_query.message.message_id
+    else:
+        sent    = await update.message.reply_text(initial, parse_mode="Markdown",
+                                                  reply_markup=markup)
+        chat_id = sent.chat_id
+        msg_id  = sent.message_id
+
+    context.user_data["menu_msg_id"] = msg_id
+
+    async def loop():
+        NORMAL, FAST, FAST_DUR = 60, 3, 15
+        fast = fast_burst; fast_rem = FAST_DUR if fast else 0; last = initial
+        try:
+            while True:
+                if fast and fast_rem > 0:
+                    await asyncio.sleep(FAST); fast_rem -= FAST
+                    m = "fast" if fast_rem > 0 else "normal"
+                    if fast_rem <= 0: fast = False
+                else:
+                    fast = False; await asyncio.sleep(NORMAL); m = "normal"
+
+                if context.user_data.get("menu_msg_id") != msg_id:
+                    return
+                sv = active_server(uid)
+                if not sv: return
+                t = await menu_text(sv, live=m)
+                if t != last:
+                    try:
+                        s2 = get_session(uid)
+                        await context.bot.edit_message_text(
+                            t, chat_id=chat_id, message_id=msg_id,
+                            parse_mode="Markdown",
+                            reply_markup=build_main_kb(
+                                multi=len(s2.get("servers", [])) > 1 if s2 else False))
+                        last = t
+                    except Exception: pass
+        except asyncio.CancelledError: pass
+
+    context.user_data["menu_task"] = asyncio.create_task(loop())
+
+
+# ── User card ─────────────────────────────────────────────────────────────────
+
+def fmt_user(u: dict) -> str:
+    icon    = "✅" if u.get("status") == "Active" else "❌"
+    expires = (u.get("expires") or "")[:10] or "Never"
+    conns   = u.get("connections", 0)
+    ml      = u.get("max_logins")
+    limit   = f"/{ml}" if ml else "/∞"
+    svcs    = u.get("services") or []
+    svc_str = f"\nServices: `{'`, `'.join(svcs)}`" if svcs else ""
+    return (f"{icon} *{u['username']}*\n\n"
+            f"`{u['password']}`\n"
+            f"Expires: {expires}\n"
+            f"{'Temporary' if u.get('temporary') else 'Permanent'}\n"
+            f"Connections: {conns}{limit}"
+            f"{svc_str}")
+
+
+def kb_user_actions(username: str, is_temp: bool, is_active: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔑 Password",   callback_data=f"pwd_{username}"),
          InlineKeyboardButton("⏰ Expiry",     callback_data=f"exp_{username}")],
         [InlineKeyboardButton("🔒 Max Logins", callback_data=f"maxlog_{username}"),
-         InlineKeyboardButton("→ Permanent" if is_temporary else "→ Temporary", callback_data=f"toggle_{username}")],
+         InlineKeyboardButton("→ Permanent" if is_temp else "→ Temporary",
+                              callback_data=f"toggle_{username}")],
         [InlineKeyboardButton("⏸ Deactivate" if is_active else "▶️ Reactivate",
                               callback_data=f"{'deact' if is_active else 'react'}_{username}"),
          InlineKeyboardButton("🗑 Delete",     callback_data=f"del_{username}")],
@@ -143,825 +335,1059 @@ def kb_user_actions(username, is_temporary, is_active):
     ])
 
 
-# ── DNS keyboards ─────────────────────────────────────────────────────────────
-
-def kb_dns_main():
-    rows = [
-        [InlineKeyboardButton("➕ New Record",    callback_data="dns_new"),
-         InlineKeyboardButton("📋 List Records",  callback_data="dns_list")],
-        [InlineKeyboardButton("🗑 Delete Record", callback_data="dns_delete_pick")],
-        [InlineKeyboardButton("🔙 Menu",          callback_data="back_to_menu")],
-    ]
-    return InlineKeyboardMarkup(rows)
-
-def kb_dns():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 DNS",  callback_data="dns_menu")]])
-
-def kb_dns_types():
-    rows = [[InlineKeyboardButton(t, callback_data=f"dnstype_{t}")] for t in dns.RECORD_TYPES]
-    rows.append([InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")])
-    return InlineKeyboardMarkup(rows)
-
-def kb_dns_proxied(username):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🟠 Proxied (CDN)",  callback_data="dnsproxy_yes"),
-         InlineKeyboardButton("⚪ DNS only",        callback_data="dnsproxy_no")],
-        [InlineKeyboardButton("❌ Cancel",          callback_data="dns_menu")],
-    ])
-
-
-# ── DNS page text ─────────────────────────────────────────────────────────────
-
-def dns_page_text():
-    domain = cfg.get("CF_ROOT_DOMAIN") or cfg.get("DOMAIN", "—")
-    if not dns.is_configured():
-        return f"*🌐 DNS Manager*\n\n`{domain}`\n\n⚠️ Cloudflare not configured.\nAdd `cf_token` and `cf_zone` to config.yaml"
-    return f"*🌐 DNS Manager*\n\n`{domain}`\n\nManage Cloudflare DNS records."
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _cancel_menu_task(context):
-    task = context.user_data.pop("menu_task", None)
-    if task and not task.done():
-        task.cancel()
-
-
-async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text=None, fast_burst=False):
-    _cancel_menu_task(context)
-    context.user_data.clear()
-
-    mode    = "fast" if fast_burst else "normal"
-    initial = text or menu_text(live=mode)
-    if update.callback_query:
-        await update.callback_query.edit_message_text(initial, reply_markup=kb_main(), parse_mode="Markdown")
-        chat_id = update.callback_query.message.chat_id
-        msg_id  = update.callback_query.message.message_id
-    else:
-        sent    = await update.message.reply_text(initial, reply_markup=kb_main(), parse_mode="Markdown")
-        chat_id = sent.chat_id
-        msg_id  = sent.message_id
-
-    if text:
-        fast_burst = False
-
-    context.user_data["menu_msg_id"] = msg_id
-
-    async def menu_loop():
-        NORMAL_REFRESH, FAST_REFRESH, FAST_DURATION = 60, 3, 15
-        fast = fast_burst
-        fast_remaining = FAST_DURATION if fast else 0
-        last_text = initial
-        try:
-            while True:
-                if fast and fast_remaining > 0:
-                    await asyncio.sleep(FAST_REFRESH)
-                    fast_remaining -= FAST_REFRESH
-                    mode = "fast" if fast_remaining > 0 else "normal"
-                    if fast_remaining <= 0:
-                        fast = False
-                else:
-                    fast = False
-                    await asyncio.sleep(NORMAL_REFRESH)
-                    mode = "normal"
-
-                if context.user_data.get("menu_msg_id") != msg_id:
-                    return
-
-                t = menu_text(live=mode)
-                if t != last_text:
-                    try:
-                        await context.bot.edit_message_text(
-                            t, chat_id=chat_id, message_id=msg_id,
-                            parse_mode="Markdown", reply_markup=kb_main())
-                        last_text = t
-                    except Exception:
-                        pass
-        except asyncio.CancelledError:
-            pass
-
-    context.user_data["menu_task"] = asyncio.create_task(menu_loop())
-
-
-async def show_user(query, username, context: ContextTypes.DEFAULT_TYPE = None):
+async def show_user(q, server: dict, username: str, context=None):
     if context is not None:
         context.user_data.pop("menu_msg_id", None)
-    user = core.get_user(username)
-    if not user:
-        await query.edit_message_text("❌ User not found", reply_markup=kb_users())
-        return
-    await query.edit_message_text(fmt_user(user), parse_mode="Markdown",
-                                  reply_markup=kb_user_actions(username, user["temporary"], user["status"] == "Active"))
-
-
-def parse_positive_int(text):
     try:
-        n = int(text)
-        if n <= 0: raise ValueError
-        return n
-    except (ValueError, TypeError):
-        raise ValueError("❌ Invalid number (must be > 0)")
+        u = await api_get(server, f"/api/users/{username}")
+    except ApiError:
+        await q.edit_message_text("❌ User not found", reply_markup=kb_users())
+        return
+    await q.edit_message_text(fmt_user(u), parse_mode="Markdown",
+                              reply_markup=kb_user_actions(
+                                  username, u.get("temporary"), u.get("status") == "Active"))
 
 
-# ── Handlers ──────────────────────────────────────────────────────────────────
+# ── Commands ──────────────────────────────────────────────────────────────────
 
-async def cmd_start(update, context):
-    if not await check_admin(update): return
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_menu(update, context)
 
-async def cmd_cancel(update, context):
-    if not await check_admin(update): return
-    await show_menu(update, context, "❌ Cancelled")
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await show_menu(update, context, notice="❌ Cancelled")
 
+async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["action"] = "login_username"
+    await update.message.reply_text(
+        f"*🔐 Login*\n\nPrimary API: `{PRIMARY_URL}`\n\n"
+        "Send your Linux username:\n\n/cancel to abort",
+        parse_mode="Markdown")
+
+async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    clear_session(uid)
+    _cancel_menu_task(context)
+    context.user_data.clear()
+    await update.message.reply_text("✅ Logged out. Use /login to reconnect.")
+
+async def cmd_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid  = update.effective_user.id
+    sess = get_session(uid)
+    if not sess:
+        await update.message.reply_text("Not logged in. Use /login."); return
+    servers = sess.get("servers", [])
+    aid     = sess.get("active_id")
+    lines   = ["*🖥 Available Servers*\n"]
+    for s in servers:
+        mark = "✅" if s["id"] == aid else "•"
+        lines.append(f"{mark} *{s['name']}*\n   `{s['url']}`")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown",
+                                    reply_markup=kb([("🖥 Switch",  "switch_server"),
+                                                     ("🔙 Menu",    "back_to_menu")]))
+
+
+# ── Button dispatcher ─────────────────────────────────────────────────────────
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
+    q   = update.callback_query
+    uid = q.from_user.id
     try: await q.answer()
     except Exception: pass
 
-    if not is_admin(q.from_user.id):
-        try: await q.edit_message_text("⛔ Unauthorized")
-        except Exception: pass
+    data = q.data
+
+    # ── Pre-session callbacks ──────────────────────────────────────────────────
+    if data == "login_start":
+        context.user_data.clear()
+        context.user_data["action"] = "login_username"
+        await q.edit_message_text(
+            f"*🔐 Login*\n\nPrimary API: `{PRIMARY_URL}`\n\n"
+            "Send your Linux username:\n\n/cancel to abort",
+            parse_mode="Markdown")
         return
 
-    data = q.data
+    if data == "back_to_menu":
+        await show_menu(update, context); return
+
+    if data == "menu_refresh":
+        await show_menu(update, context, fast_burst=True); return
+
+    # ── Session required ───────────────────────────────────────────────────────
+    sess = get_session(uid)
+    if not sess:
+        await q.edit_message_text("⚠️ Session expired. Please /login again.",
+                                  reply_markup=kb([("🔐 Login", "login_start")]))
+        return
+
+    # ── Server switcher ────────────────────────────────────────────────────────
+    if data == "switch_server":
+        servers = sess.get("servers", [])
+        aid     = sess.get("active_id")
+        rows    = [[InlineKeyboardButton(
+                        ("✅ " if s["id"] == aid else "") + s["name"],
+                        callback_data=f"selserver_{s['id']}")] for s in servers]
+        rows.append([InlineKeyboardButton("🔄 Refresh", callback_data="refresh_serverlist"),
+                     InlineKeyboardButton("🔙 Menu",    callback_data="back_to_menu")])
+        await q.edit_message_text("*🖥 Select Server*", parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(rows))
+        return
+
+    if data.startswith("selserver_"):
+        sid = data[10:]
+        s   = next((s for s in sess.get("servers", []) if s["id"] == sid), None)
+        if s:
+            sess["active_id"] = sid
+            set_session(uid, sess)
+            await show_menu(update, context, notice=f"✅ Switched to *{s['name']}*")
+        else:
+            await q.edit_message_text("❌ Server not found", reply_markup=kb_menu())
+        return
+
+    if data == "refresh_serverlist":
+        try:
+            servers = await fetch_serverlist(sess["primary_token"])
+            sess["servers"] = servers
+            ids = {s["id"] for s in servers}
+            if sess.get("active_id") not in ids:
+                sess["active_id"] = servers[0]["id"] if servers else None
+            set_session(uid, sess)
+            await q.edit_message_text(
+                f"✅ Refreshed — {len(servers)} server(s)",
+                reply_markup=kb([("🖥 Switch", "switch_server"), ("🔙 Menu", "back_to_menu")]))
+        except ApiError as e:
+            await q.edit_message_text(f"❌ {e.detail}", reply_markup=kb_menu())
+        return
+
+    # Resolve active server for all remaining actions
+    server = active_server(uid)
+    if not server:
+        await q.edit_message_text("⚠️ No active server.",
+                                  reply_markup=kb([("🔐 Login", "login_start")])); return
 
     def leave_menu():
         context.user_data.pop("menu_msg_id", None)
 
-    if data == "back_to_menu":
-        await show_menu(update, context)
+    try:
+        await _dispatch(q, update, context, uid, server, sess, data, leave_menu)
+    except ApiError as e:
+        await q.edit_message_text(f"❌ API {e.status}:\n`{e.detail}`",
+                                  parse_mode="Markdown", reply_markup=kb_menu())
+    except Exception as e:
+        logger.exception("Button error")
+        await q.edit_message_text(f"❌ Unexpected error:\n`{e}`",
+                                  parse_mode="Markdown", reply_markup=kb_menu())
 
-    elif data == "sync_now":
+
+async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  # noqa: C901
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SYNC
+    # ══════════════════════════════════════════════════════════════════════════
+    if data == "sync_now":
         leave_menu()
-        r = core.sync()
-        msg = "✅ Synced"
-        if r["deleted_count"]: msg += f"\n{r['deleted_count']} expired user(s) removed"
-        await q.edit_message_text(msg, reply_markup=kb_menu())
+        r  = await api_post(server, "/api/sync")
+        dc = r.get("deleted_count", 0) if isinstance(r, dict) else 0
+        await q.edit_message_text("✅ Synced" + (f"\n{dc} expired removed" if dc else ""),
+                                  reply_markup=kb_menu())
 
-    elif data == "menu_refresh":
-        await show_menu(update, context, fast_burst=True)
-
+    # ══════════════════════════════════════════════════════════════════════════
+    # SPEED TEST
+    # ══════════════════════════════════════════════════════════════════════════
     elif data == "speedtest":
-        _cancel_menu_task(context)
         leave_menu()
-        old_proc = context.user_data.pop("speedtest_proc", None)
-        if old_proc:
-            try: old_proc.kill()
-            except Exception: pass
-
-        proc, progress_file = st.start()
-        context.user_data.update(speedtest_proc=proc, speedtest_file=progress_file, speedtest_cancelled=False)
-
-        kb_cancel = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="speedtest_cancel")]])
-        kb_done   = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔄 Test Again", callback_data="speedtest"),
-            InlineKeyboardButton("🔙 Menu",       callback_data="back_to_menu"),
-        ]])
+        await q.edit_message_text("*🚀 Speed Test*\n\n_Running… (30–60 s)_",
+                                  parse_mode="Markdown",
+                                  reply_markup=kb([("❌ Cancel", "back_to_menu")]))
         chat_id, msg_id = q.message.chat_id, q.message.message_id
+        kb_done = kb([("🔄 Test Again", "speedtest"), ("🔙 Menu", "back_to_menu")])
 
-        async def run_and_update():
-            last_msg = last_p = None
-            while proc.poll() is None:
-                await asyncio.sleep(1)
-                if context.user_data.get("speedtest_cancelled"): return
-                p = st.poll(progress_file)
-                if p:
-                    last_p = p
-                    pct   = p.get("pct", 0)
-                    speed = p.get("speed", "…")
-                    eta   = p.get("eta")
-                    phase = p.get("phase", "")
-                    bar   = "█" * (pct // 10) + "░" * (10 - pct // 10)
-
-                    if phase in ("starting", "ping"):
-                        status = f"📶 {phase.capitalize()}…"
-                    elif eta:
-                        status = f"⬇️ `{speed}` • ETA {eta}"
-                    else:
-                        status = f"⬇️ `{speed}`"
-
-                    msg = f"*🚀 Speed Test*\n\n`{bar}` {pct}%\n{status}"
-                    if msg != last_msg:
-                        try:
-                            await context.bot.edit_message_text(msg, chat_id=chat_id, message_id=msg_id,
-                                parse_mode="Markdown", reply_markup=kb_cancel)
-                            last_msg = msg
-                        except Exception: pass
-
-            result = st.parse_result(progress_file)   # read BEFORE cleanup
-            st.cleanup(progress_file)
-            context.user_data.pop("speedtest_proc", None)
-            context.user_data.pop("speedtest_file", None)
-            if proc.returncode not in (0, None):
-                final = "🚫 *Cancelled*"
-            else:
-                if result:
-                    final = st.format_result(result, BW_DOWN, BW_UP)
-                elif last_p:
-                    dl    = f"⬇️ `{last_p.get('speed', '?')}`" + (f" / {BW_DOWN}" if BW_DOWN else "")
-                    final = f"*🚀 Speed Test Result*\n\n{dl}"
-                else:
-                    final = "❌ Speed test failed"
+        async def run_st():
             try:
-                await context.bot.edit_message_text(final, chat_id=chat_id, message_id=msg_id,
-                    parse_mode="Markdown", reply_markup=kb_done)
+                r    = await api_get(server, "/api/speedtest")
+                dl   = r.get("download", {}).get("bandwidth", 0)
+                ul   = r.get("upload",   {}).get("bandwidth", 0)
+                ping = (r.get("ping") or {}).get("latency")
+                def mbps(b): return f"{b*8/1_000_000:.1f} Mbps" if b else "?"
+                msg  = (f"*🚀 Speed Test*\n\n"
+                        f"⬇️ Download: `{mbps(dl)}`\n"
+                        f"⬆️ Upload: `{mbps(ul)}`")
+                if ping: msg += f"\n📶 Ping: `{ping:.1f} ms`"
+            except ApiError as e: msg = f"❌ `{e.detail}`"
+            except Exception  as e: msg = f"❌ `{e}`"
+            try:
+                await context.bot.edit_message_text(msg, chat_id=chat_id, message_id=msg_id,
+                                                    parse_mode="Markdown", reply_markup=kb_done)
             except Exception: pass
 
-        await q.edit_message_text("*🚀 Speed Test*\n\n`░░░░░░░░░░` 0%",
-            parse_mode="Markdown", reply_markup=kb_cancel)
-        asyncio.create_task(run_and_update())
+        asyncio.create_task(run_st())
 
-    elif data == "speedtest_cancel":
-        context.user_data["speedtest_cancelled"] = True
-        proc = context.user_data.pop("speedtest_proc", None)
-        path = context.user_data.pop("speedtest_file", None)
-        if proc:
-            try: proc.kill()
-            except Exception: pass
-        if path:
-            st.cleanup(path)  # fixed: was system.speedtest_cleanup
-        await q.edit_message_text("🚫 *Cancelled*", parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔄 Test Again", callback_data="speedtest"),
-                InlineKeyboardButton("🔙 Menu",       callback_data="back_to_menu"),
-            ]]))
-
+    # ══════════════════════════════════════════════════════════════════════════
+    # BACKUP
+    # ══════════════════════════════════════════════════════════════════════════
     elif data == "backup_menu":
         leave_menu()
-        await q.edit_message_text("*Database Backup*\n\nChoose an option:", parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📤 Backup DB",  callback_data="backup_send")],
-                [InlineKeyboardButton("♻️ Restore DB", callback_data="backup_restore")],
-                [InlineKeyboardButton("🔁 Sync DB",    callback_data="backup_sync")],
-                [InlineKeyboardButton("🔙 Menu",       callback_data="back_to_menu")],
-            ]))
+        await q.edit_message_text(
+            "*💾 Backup & Restore*", parse_mode="Markdown",
+            reply_markup=kb([("📤 Download DB",  "backup_send")],
+                            [("♻️ Restore DB",    "backup_restore")],
+                            [("🔁 Merge DB",      "backup_merge")],
+                            [("🔙 Menu",          "back_to_menu")]))
 
     elif data == "backup_send":
-        db = cfg["DB_FILE"]
-        if not os.path.exists(db):
-            await q.edit_message_text("❌ Database not found", reply_markup=kb_menu())
-            return
-        await q.message.reply_document(document=open(db, "rb"), filename="users.db", caption="📦 users.db backup")
+        raw = await api_get(server, "/api/backup")
+        await q.message.reply_document(
+            document=io.BytesIO(raw if isinstance(raw, bytes) else b""),
+            filename="users.db",
+            caption=f"📦 `{server['name']}` — users.db", parse_mode="Markdown")
         await show_menu(update, context)
 
     elif data == "backup_restore":
         leave_menu()
         context.user_data["action"] = "restore_db"
-        await q.edit_message_text("*Send users.db file*\n\nThis will REPLACE current database.\n\n/cancel to abort",
-                                   parse_mode="Markdown", reply_markup=kb_menu())
-
-    elif data == "backup_sync":
-        leave_menu()
-        context.user_data["action"] = "sync_db"
         await q.edit_message_text(
-            "*Send users.db file*\n\nUsers from the file will be merged into the current database.\n\n"
-            "/cancel to go back",
+            "*♻️ Restore DB*\n\nSend a `users.db` file.\n⚠️ This *replaces* the current database.\n\n/cancel to abort",
             parse_mode="Markdown", reply_markup=kb_menu())
 
+    elif data == "backup_merge":
+        leave_menu()
+        context.user_data["action"] = "merge_db"
+        await q.edit_message_text(
+            "*🔁 Merge DB*\n\nSend a `users.db` file — users will be merged in.\n\n/cancel to abort",
+            parse_mode="Markdown", reply_markup=kb_menu())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # USERS
+    # ══════════════════════════════════════════════════════════════════════════
     elif data == "manage_users":
         leave_menu()
-        users = core.get_users()
+        users = await api_get(server, "/api/users")
         if not users:
-            await q.edit_message_text("ℹ️ No users", reply_markup=kb_menu())
-            return
+            await q.edit_message_text("ℹ️ No users", reply_markup=kb_menu()); return
         context.user_data["user_list"] = users
         msg = "*All Users*\n\n"
         for i, u in enumerate(users, 1):
-            icon = "✅" if u["status"] == "Active" else "❌"
-            temp = "⏱" if u["temporary"] else ""
-            c    = system.user_connections(u["username"])
-            conn = f"{c}/{u['max_logins']}🔌" if u["max_logins"] else f"{c}🔌"
+            icon = "✅" if u.get("status") == "Active" else "❌"
+            temp = "⏱" if u.get("temporary") else ""
+            c    = u.get("connections", 0)
+            ml   = u.get("max_logins")
+            conn = f"{c}/{ml}🔌" if ml else f"{c}🔌"
             msg += f"`{i:02d}` {icon}{temp} {conn} `{u['username']}` • `{u['password']}`\n"
-        msg += f"\n*Total: {len(users)} users*\nEnter user number to manage:"
-        keyboard = [
-            [InlineKeyboardButton(str(n), callback_data=f"usernum_{n}") for n in range(s, min(s+9, len(users)+1))]
+        msg += f"\n*Total: {len(users)}*"
+        rows = [
+            [InlineKeyboardButton(str(n), callback_data=f"usernum_{n}")
+             for n in range(s, min(s+9, len(users)+1))]
             for s in range(1, len(users)+1, 9)
         ] + [[InlineKeyboardButton("🔙 Menu", callback_data="back_to_menu")]]
-        await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await q.edit_message_text(msg, parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(rows))
 
     elif data.startswith("usernum_"):
         users = context.user_data.get("user_list", [])
         try:
             idx = int(data[8:]) - 1
-            await show_user(q, users[idx]["username"], context)
+            await show_user(q, server, users[idx]["username"], context)
         except (ValueError, IndexError):
             await q.edit_message_text("❌ Invalid selection", reply_markup=kb_users())
 
-    elif data.startswith("select_"):    await show_user(q, data[7:], context)
-    elif data.startswith("toggle_"):    core.toggle_temporary(data[7:]); await show_user(q, data[7:], context)
+    elif data.startswith("select_"):
+        await show_user(q, server, data[7:], context)
+
+    elif data.startswith("toggle_"):
+        un = data[7:]
+        await api_post(server, f"/api/users/{un}/toggle-temporary")
+        await show_user(q, server, un, context)
 
     elif data.startswith("maxlog_"):
-        username = data[7:]
-        user = core.get_user(username)
-        cur  = f"Current: {user['max_logins']}" if user and user["max_logins"] else "Current: Unlimited"
-        context.user_data.update(action="set_maxlogins", maxlogins_username=username)
+        un  = data[7:]
+        u   = await api_get(server, f"/api/users/{un}")
+        cur = f"Current: {u['max_logins']}" if u.get("max_logins") else "Current: Unlimited"
+        context.user_data.update(action="set_maxlogins", maxlogins_username=un)
         await q.edit_message_text(
-            f"*Max Logins: {username}*\n\n{cur}\n\nSend a number to set a limit, or `0` to remove it.\n\n/cancel to go back",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+            f"*Max Logins: {un}*\n\n{cur}\n\nSend a number (0 = unlimited).\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb([(f"🔙 Back", f"select_{un}")]))
 
     elif data.startswith("pwd_") and data not in ("pwd_random", "pwd_custom"):
-        username = data[4:]
-        context.user_data["change_password_username"] = username
-        await q.edit_message_text(f"*Change Password: {username}*\n\nChoose an option:", parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎲 Random", callback_data="pwd_random"),
-                 InlineKeyboardButton("✍️ Custom", callback_data="pwd_custom")],
-                [InlineKeyboardButton("🔙 Back",   callback_data=f"select_{username}")],
-            ]))
+        un = data[4:]
+        context.user_data["change_password_username"] = un
+        await q.edit_message_text(
+            f"*Change Password: {un}*", parse_mode="Markdown",
+            reply_markup=kb([("🎲 Random", "pwd_random"), ("✍️ Custom", "pwd_custom")],
+                            [(f"🔙 Back",  f"select_{un}")]))
 
     elif data == "pwd_random":
-        username = context.user_data.get("change_password_username")
-        if not username:
-            await q.edit_message_text("❌ Session expired", reply_markup=kb_users())
-            context.user_data.clear(); return
-        ok, old, new = core.change_password(username)
-        if ok:
-            await q.edit_message_text(f"✅ *Password Changed*\n\n`{username}`\n`{old}` → `{new}`",
-                                       parse_mode="Markdown", reply_markup=kb_users())
-        else:
-            await q.edit_message_text("❌ Failed", reply_markup=kb_users())
-        context.user_data.clear()
+        un = context.user_data.pop("change_password_username", None)
+        if not un:
+            await q.edit_message_text("❌ Session expired", reply_markup=kb_users()); return
+        r = await api_post(server, f"/api/users/{un}/password", json={})
+        await q.edit_message_text(
+            f"✅ *Password Changed*\n\n`{un}`\n`{r['old_password']}` → `{r['new_password']}`",
+            parse_mode="Markdown", reply_markup=kb_users())
 
     elif data == "pwd_custom":
-        username = context.user_data.get("change_password_username")
-        if not username:
-            await q.edit_message_text("❌ Session expired", reply_markup=kb_users())
-            context.user_data.clear(); return
+        un = context.user_data.get("change_password_username")
+        if not un:
+            await q.edit_message_text("❌ Session expired", reply_markup=kb_users()); return
         context.user_data["action"] = "change_password_custom"
-        await q.edit_message_text(f"*Custom Password for {username}*\n\nSend new password\n\n/cancel to go back",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+        await q.edit_message_text(
+            f"*Custom Password for {un}*\n\nSend new password.\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb([(f"🔙 Back", f"select_{un}")]))
 
-    elif data.startswith("exp_") and not any(data.startswith(p) for p in ("expset_", "expextend_", "expnever_")):
-        username = data[4:]
-        context.user_data["modify_expiry_username"] = username
-        await q.edit_message_text(f"*Modify Expiration: {username}*\n\nChoose an option:", parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📅 Set",          callback_data=f"expset_{username}")],
-                [InlineKeyboardButton("➕ Extend",       callback_data=f"expextend_{username}")],
-                [InlineKeyboardButton("♾️ Never Expire", callback_data=f"expnever_{username}")],
-                [InlineKeyboardButton("🔙 Back",         callback_data=f"select_{username}")],
-            ]))
+    elif data.startswith("exp_") and not any(data.startswith(p)
+                                             for p in ("expset_","expextend_","expnever_")):
+        un = data[4:]
+        context.user_data["modify_expiry_username"] = un
+        await q.edit_message_text(
+            f"*Modify Expiry: {un}*", parse_mode="Markdown",
+            reply_markup=kb([("📅 Set",         f"expset_{un}")],
+                            [("➕ Extend",       f"expextend_{un}")],
+                            [("♾️ Never Expire", f"expnever_{un}")],
+                            [(f"🔙 Back",        f"select_{un}")]))
 
     elif data.startswith("expset_"):
-        username = data[7:]
-        context.user_data.update(action="modify_expiry_set", modify_expiry_username=username)
-        await q.edit_message_text(f"*Set Expiry: {username}*\n\nDays from now:\n`7` `30` `365`\n\n/cancel to go back",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+        un = data[7:]
+        context.user_data.update(action="modify_expiry_set", modify_expiry_username=un)
+        await q.edit_message_text(
+            f"*Set Expiry: {un}*\n\nDays from now (e.g. `7`, `30`, `365`):\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb([(f"🔙 Back", f"select_{un}")]))
 
     elif data.startswith("expextend_"):
-        username = data[10:]
-        context.user_data.update(action="modify_expiry_extend", modify_expiry_username=username)
-        await q.edit_message_text(f"*Extend Expiry: {username}*\n\nDays to add:\n`7` `30`\n\n/cancel to go back",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"select_{username}")]]))
+        un = data[10:]
+        context.user_data.update(action="modify_expiry_extend", modify_expiry_username=un)
+        await q.edit_message_text(
+            f"*Extend Expiry: {un}*\n\nDays to add:\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb([(f"🔙 Back", f"select_{un}")]))
 
     elif data.startswith("expnever_"):
-        username = data[9:]
-        if core.set_expiry(username, None):
-            await q.edit_message_text(f"✅ *{username}*\n\nNow permanent", parse_mode="Markdown", reply_markup=kb_users())
-        else:
-            await q.edit_message_text("❌ Failed", reply_markup=kb_users())
-        context.user_data.clear()
+        un = data[9:]
+        await api_delete(server, f"/api/users/{un}/expiry")
+        await q.edit_message_text(f"✅ *{un}* set to permanent",
+                                  parse_mode="Markdown", reply_markup=kb_users())
 
     elif data.startswith("deact_"):
-        username = data[6:]; core.set_active(username, False)
-        await q.edit_message_text(f"⏸ `{username}` deactivated", parse_mode="Markdown", reply_markup=kb_users())
-        context.user_data.clear()
+        un = data[6:]
+        await api_post(server, f"/api/users/{un}/deactivate")
+        await q.edit_message_text(f"⏸ `{un}` deactivated",
+                                  parse_mode="Markdown", reply_markup=kb_users())
 
     elif data.startswith("react_"):
-        username = data[6:]; core.set_active(username, True)
-        await q.edit_message_text(f"▶️ `{username}` reactivated", parse_mode="Markdown", reply_markup=kb_users())
-        context.user_data.clear()
+        un = data[6:]
+        await api_post(server, f"/api/users/{un}/activate")
+        await q.edit_message_text(f"▶️ `{un}` reactivated",
+                                  parse_mode="Markdown", reply_markup=kb_users())
 
     elif data.startswith("del_") and not data.startswith("del_dns_"):
-        username = data[4:]
-        if core.delete_user(username):
-            await q.edit_message_text(f"✅ User `{username}` deleted", parse_mode="Markdown", reply_markup=kb_users())
-        else:
-            await q.edit_message_text("❌ Failed", reply_markup=kb_users())
-        context.user_data.clear()
-
-    elif data == "shoot_server":
-        leave_menu()
-        tmux = shutil.which("tmux")
-        if not tmux:
-            await q.edit_message_text("❌ tmux not found", reply_markup=kb_menu()); return
-        result   = subprocess.run([tmux, "ls"], capture_output=True, text=True)
-        sessions = [l.split(":")[0].strip() for l in result.stdout.splitlines() if ":" in l]
-        if not sessions:
-            await q.edit_message_text("ℹ️ No tmux sessions running", reply_markup=kb_menu()); return
-        keyboard = [[InlineKeyboardButton(f"🎯 {s}", callback_data=f"shootsvc_{s}")] for s in sessions]
-        keyboard.append([InlineKeyboardButton("🔙 Menu", callback_data="back_to_menu")])
-        await q.edit_message_text("*Running Services*\n\nSelect a service to restart:",
-                                   parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data.startswith("shootsvc_"):
-        service = data[9:]
-        preview = ""
-        config_file = cfg["CONFIG_FILE"]
-        if service == "zivpn" and os.path.exists(config_file):
-            try:
-                content = open(config_file).read()
-                preview = f"\n\n*Config Preview:*\n```\n{content[:400]}\n```"
-                if len(content) > 400: preview += "\n_... (truncated)_"
-            except Exception:
-                preview = "\n\n⚠️ Could not read config"
-        await q.edit_message_text(f"*Restart: {service}*{preview}\n\nConfirm?", parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Confirm", callback_data=f"shootconfirm_{service}")],
-                [InlineKeyboardButton("🔙 Cancel",  callback_data="shoot_server")],
-            ]))
-
-    elif data.startswith("shootconfirm_"):
-        service = data[13:]
-        tmux    = shutil.which("tmux")
-        if tmux:
-            subprocess.run([tmux, "send-keys", "-t", service, "C-c"], check=False)
-            status_text = menu_text(live="normal") + f"\n\n✅ `{service}` restarted"
-            await update.callback_query.edit_message_text(status_text, reply_markup=kb_main(), parse_mode="Markdown")
-            chat_id = update.callback_query.message.chat_id
-            msg_id  = update.callback_query.message.message_id
-            context.user_data.clear()
-            context.user_data["menu_msg_id"] = msg_id
-
-            async def fade_status():
-                await asyncio.sleep(4)
-                if context.user_data.get("menu_msg_id") != msg_id: return
-                try:
-                    await context.bot.edit_message_text(menu_text(live="normal"),
-                        chat_id=chat_id, message_id=msg_id, parse_mode="Markdown", reply_markup=kb_main())
-                except Exception: pass
-                await show_menu(update, context)
-
-            asyncio.create_task(fade_status())
-        else:
-            await update.callback_query.edit_message_text("❌ tmux not found", reply_markup=kb_menu())
-            context.user_data.clear()
-
-    # ── DNS ───────────────────────────────────────────────────────────────────
-
-    elif data == "dns_menu":
-        leave_menu()
-        await q.edit_message_text(dns_page_text(), parse_mode="Markdown", reply_markup=kb_dns_main())
-
-    elif data == "dns_list":
-        if not dns.is_configured():
-            await q.edit_message_text("⚠️ Cloudflare not configured", reply_markup=kb_dns())
-            return
-        try:
-            records = dns.list_records()
-        except RuntimeError as e:
-            await q.edit_message_text(f"❌ CF API error: {e}", reply_markup=kb_dns())
-            return
-        if not records:
-            await q.edit_message_text("ℹ️ No DNS records found", reply_markup=kb_dns())
-            return
-        chunk_size = 20
-        chunks = [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
-        for idx, chunk in enumerate(chunks):
-            lines = [f"*📋 DNS Records ({idx*chunk_size+1}–{idx*chunk_size+len(chunk)} of {len(records)})*\n"]
-            for r in chunk:
-                proxy = "🟠" if r.get("proxied") else "⚪"
-                lines.append(f"{proxy} `{r['name']}` → `{r['content']}` *{r['type']}*")
-            is_last = idx == len(chunks) - 1
-            kb = kb_dns() if is_last else None
-            if idx == 0:
-                await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=kb)
-            else:
-                await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=kb)
-
-    elif data == "dns_new":
-        if not dns.is_configured():
-            await q.edit_message_text("⚠️ Cloudflare not configured", reply_markup=kb_dns())
-            return
-        context.user_data["dns_step"] = "type"
-        await q.edit_message_text("*➕ New DNS Record*\n\nSelect record type:",
-            parse_mode="Markdown", reply_markup=kb_dns_types())
-
-    elif data.startswith("dnstype_"):
-        rtype = data[8:]
-        cf_domain = cfg.get("CF_ROOT_DOMAIN") or cfg.get("DOMAIN", "")
-        context.user_data.update(dns_rtype=rtype, dns_step="name", action="dns_name")
-        await q.edit_message_text(
-            f"*Type: {rtype}*\n\nEnter subdomain name:\n`sub` → `sub.{cf_domain}`\n\n/cancel to go back",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")]]))
-
-    elif data.startswith("dnsproxy_"):
-        proxied  = data == "dnsproxy_yes"
-        rtype    = context.user_data.get("dns_rtype", "A")
-        name     = context.user_data.get("dns_name", "")
-        value    = context.user_data.get("dns_value", "")
-        context.user_data.clear()
-
-        await q.edit_message_text("⏳ Creating record…", parse_mode="Markdown")
-        result = dns.create_record(rtype, name, value, proxied)
-        if result.get("success"):
-            rec   = result["result"]
-            proxy_label = "🟠 Proxied" if proxied else "⚪ DNS only"
-            rid   = rec["id"]
-            msg   = (
-                f"✅ *Record Created*\n\n"
-                f"`{rec['name']}`\n"
-                f"Type: `{rtype}` · {proxy_label}\n"
-                f"Value: `{value}`"
-            )
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑 Delete this record", callback_data=f"del_dns_{rid}")],
-                [InlineKeyboardButton("🔙 DNS",               callback_data="dns_menu")],
-            ])
-        else:
-            errors = result.get("errors", [])
-            msg    = f"❌ Failed: {errors[0].get('message') if errors else 'Unknown error'}"
-            kb     = kb_dns()
-        await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=kb)
-
-    elif data.startswith("del_dns_"):
-        record_id = data[8:]
-        result = dns.delete_record(record_id)
-        if result.get("success"):
-            await q.edit_message_text("🗑 Record deleted.", reply_markup=kb_dns())
-        else:
-            await q.edit_message_text("❌ Could not delete record.", reply_markup=kb_dns())
-
-    elif data == "dns_delete_pick":
-        if not dns.is_configured():
-            await q.edit_message_text("⚠️ Cloudflare not configured", reply_markup=kb_dns())
-            return
-        try:
-            records = dns.list_records()
-        except RuntimeError as e:
-            await q.edit_message_text(f"❌ CF API error: {e}", reply_markup=kb_dns())
-            return
-        if not records:
-            await q.edit_message_text("ℹ️ No records to delete", reply_markup=kb_dns())
-            return
-
-        context.user_data["dns_delete_records"] = records
-        context.user_data["action"] = "dns_delete_pick"
-        chunk_size = 20
-        chunks = [records[i:i+chunk_size] for i in range(0, len(records), chunk_size)]
-        for idx, chunk in enumerate(chunks):
-            lines = [f"*🗑 Delete a Record ({idx*chunk_size+1}–{idx*chunk_size+len(chunk)} of {len(records)})*\n"]
-            for i, r in enumerate(chunk, start=idx*chunk_size+1):
-                proxy = "🟠" if r.get("proxied") else "⚪"
-                lines.append(f"`{i}.` {proxy} `{r['name']}` → `{r['content']}` *{r['type']}*")
-            is_last = idx == len(chunks) - 1
-            if is_last:
-                lines.append("\n_Reply with the record number to delete_")
-            cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")]])
-            if idx == 0:
-                await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=cancel_kb if is_last else None)
-            else:
-                await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=cancel_kb if is_last else None)
+        un = data[4:]
+        await api_delete(server, f"/api/users/{un}")
+        await q.edit_message_text(f"✅ User `{un}` deleted",
+                                  parse_mode="Markdown", reply_markup=kb_users())
 
     elif data == "add_user":
         leave_menu()
         context.user_data["action"] = "add_user"
         await q.edit_message_text(
-            "*Add User*\n\nFormat:\n`username` `[days]` `[temp]` `[pwd:pass]` `[limit:N]`\n\nExamples:\n"
-            "`alice`\n`alice 30`\n`alice 7 temp`\n`alice pwd:mypass`\n`alice limit:2`\n\n/cancel to go back",
+            "*➕ Add User*\n\n"
+            "Format: `username [days] [temp] [pwd:pass] [limit:N]`\n\n"
+            "Examples:\n`alice`\n`alice 30`\n`alice 7 temp`\n"
+            "`alice pwd:secret`\n`alice limit:2`\n\n/cancel to go back",
             parse_mode="Markdown", reply_markup=kb_menu())
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # SERVICES
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "services_menu":
+        leave_menu()
+        r       = await api_get(server, "/api/services")
+        svcs    = r.get("services", []) if isinstance(r, dict) else []
+        watcher = r.get("watcher",   False) if isinstance(r, dict) else False
+        rows    = []
+        for svc in svcs:
+            name  = svc.get("name", "?")
+            icon  = "🟢" if svc.get("running") else "🔴"
+            stat  = svc.get("status", "")
+            label = f"{icon} {name}" + (f" [{stat}]" if stat else "")
+            rows.append([InlineKeyboardButton(label, callback_data=f"svc_detail_{name}")])
+        wl = "⏹ Stop Watcher" if watcher else "▶️ Start Watcher"
+        wc = "svc_watcher_stop" if watcher else "svc_watcher_start"
+        rows.append([InlineKeyboardButton(wl, callback_data=wc),
+                     InlineKeyboardButton("🔙 Menu", callback_data="back_to_menu")])
+        await q.edit_message_text(
+            f"*🎯 Services*\n\nWatcher: {'✅ active' if watcher else '⛔ stopped'}",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("svc_detail_"):
+        name = data[11:]
+        r    = await api_get(server, "/api/services")
+        svcs = r.get("services", []) if isinstance(r, dict) else []
+        svc  = next((s for s in svcs if s.get("name") == name),
+                    {"name": name, "running": False})
+        icon = "🟢" if svc.get("running") else "🔴"
+        logs = (svc.get("log_tail") or svc.get("output") or "No logs")[-800:]
+        await q.edit_message_text(
+            f"*{icon} {name}*\n\n```\n{logs}\n```", parse_mode="Markdown",
+            reply_markup=kb([("▶️ Start",    f"svc_start_{name}"),
+                             ("⏹ Stop",      f"svc_stop_{name}")],
+                            [("🔄 Reload",   f"svc_reload_{name}"),
+                             ("♻️ Restart",  f"svc_restart_{name}")],
+                            [("📌 Enable",   f"svc_enable_{name}"),
+                             ("🔕 Disable",  f"svc_disable_{name}")],
+                            [("🔙 Services", "services_menu")]))
+
+    elif data.startswith("svc_start_"):
+        name = data[10:]
+        r = await api_post(server, f"/api/services/{name}/start")
+        await q.edit_message_text(f"▶️ `{name}` — `{r.get('status','ok')}`",
+                                  parse_mode="Markdown", reply_markup=kb_svc())
+    elif data.startswith("svc_stop_"):
+        name = data[9:]
+        r = await api_post(server, f"/api/services/{name}/stop")
+        await q.edit_message_text(f"⏹ `{name}` — `{r.get('status','ok')}`",
+                                  parse_mode="Markdown", reply_markup=kb_svc())
+    elif data.startswith("svc_reload_"):
+        name = data[11:]
+        r = await api_post(server, f"/api/services/{name}/reload")
+        await q.edit_message_text(f"🔄 `{name}` — `{r.get('status','ok')}`",
+                                  parse_mode="Markdown", reply_markup=kb_svc())
+    elif data.startswith("svc_restart_"):
+        name = data[12:]
+        r = await api_post(server, f"/api/services/{name}/restart")
+        await q.edit_message_text(f"♻️ `{name}` — `{r.get('status','ok')}`",
+                                  parse_mode="Markdown", reply_markup=kb_svc())
+    elif data.startswith("svc_enable_"):
+        name = data[11:]
+        await api_post(server, f"/api/services/{name}/status", json={"status": "enable"})
+        await q.edit_message_text(f"📌 `{name}` enabled",
+                                  parse_mode="Markdown", reply_markup=kb_svc())
+    elif data.startswith("svc_disable_"):
+        name = data[12:]
+        await api_post(server, f"/api/services/{name}/status", json={"status": "disable"})
+        await q.edit_message_text(f"🔕 `{name}` disabled",
+                                  parse_mode="Markdown", reply_markup=kb_svc())
+    elif data == "svc_watcher_start":
+        await api_post(server, "/api/services/watcher/start")
+        await q.edit_message_text("✅ Watcher started", reply_markup=kb_svc())
+    elif data == "svc_watcher_stop":
+        await api_post(server, "/api/services/watcher/stop")
+        await q.edit_message_text("⏹ Watcher stopped", reply_markup=kb_svc())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # FILE MANAGER
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "file_manager":
+        leave_menu()
+        FILES = ["xray.json","hysteria1.json","hysteria2.yaml","zivpn.json",
+                 "stunnel.conf","config.yaml","udp-custom.json","websocket","bannerssh"]
+        rows = [[InlineKeyboardButton(f"📄 {f}", callback_data=f"file_view_{f}")] for f in FILES]
+        rows.append([InlineKeyboardButton("🔙 Menu", callback_data="back_to_menu")])
+        await q.edit_message_text("*📁 File Manager*", parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("file_view_"):
+        fname = data[10:]
+        try:
+            r       = await api_get(server, f"/api/files/{fname}")
+            content = r.get("content", "")
+            preview = content[:900] + ("\n…(truncated)" if len(content) > 900 else "")
+            await q.edit_message_text(
+                f"*📄 {fname}*\n\n```\n{preview}\n```", parse_mode="Markdown",
+                reply_markup=kb([(f"✏️ Edit",  f"file_edit_{fname}")],
+                                [("🔙 Files",   "file_manager")]))
+        except ApiError as e:
+            if e.status == 404:
+                await q.edit_message_text(
+                    f"📄 *{fname}* _(does not exist)_", parse_mode="Markdown",
+                    reply_markup=kb([(f"✏️ Create", f"file_edit_{fname}")],
+                                    [("🔙 Files",   "file_manager")]))
+            else: raise
+
+    elif data.startswith("file_edit_"):
+        fname = data[10:]
+        context.user_data.update(action="file_write", file_editing=fname)
+        await q.edit_message_text(
+            f"*✏️ Edit {fname}*\n\nSend the new file content.\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_files())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # DNS
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "dns_menu":
+        leave_menu()
+        try:
+            records = await api_get(server, "/api/dns")
+            count   = len(records) if isinstance(records, list) else 0
+            msg     = f"*🌐 DNS Manager*\n\n{count} record(s)"
+        except ApiError as e:
+            msg = f"*🌐 DNS Manager*\n\n⚠️ {e.detail}"
+        await q.edit_message_text(msg, parse_mode="Markdown",
+            reply_markup=kb([("➕ New",    "dns_new"),  ("📋 List",  "dns_list")],
+                            [("🗑 Delete", "dns_delete_pick")],
+                            [("🔙 Menu",  "back_to_menu")]))
+
+    elif data == "dns_list":
+        records = await api_get(server, "/api/dns")
+        if not records:
+            await q.edit_message_text("ℹ️ No DNS records", reply_markup=kb_dns()); return
+        CHUNK  = 20
+        chunks = [records[i:i+CHUNK] for i in range(0, len(records), CHUNK)]
+        for idx, batch in enumerate(chunks):
+            lines = [f"*📋 DNS ({idx*CHUNK+1}–{idx*CHUNK+len(batch)} / {len(records)})*\n"]
+            for rec in batch:
+                pr = "🟠" if rec.get("proxied") else "⚪"
+                lines.append(f"{pr} `{rec['name']}` → `{rec['content']}` *{rec['type']}*")
+            is_last = idx == len(chunks) - 1
+            markup  = kb_dns() if is_last else None
+            if idx == 0: await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+            else:        await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+
+    elif data == "dns_new":
+        DNS_TYPES = ["A","AAAA","CNAME","TXT","MX","NS","SRV"]
+        rows = [[InlineKeyboardButton(t, callback_data=f"dnstype_{t}")] for t in DNS_TYPES]
+        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")])
+        await q.edit_message_text("*➕ New DNS Record*\n\nSelect type:",
+                                  parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("dnstype_"):
+        rtype = data[8:]
+        context.user_data.update(dns_rtype=rtype, action="dns_name")
+        await q.edit_message_text(
+            f"*Type: {rtype}*\n\nEnter subdomain name:\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb([("❌ Cancel", "dns_menu")]))
+
+    elif data.startswith("dnsproxy_"):
+        proxied = data == "dnsproxy_yes"
+        rtype   = context.user_data.get("dns_rtype", "A")
+        name    = context.user_data.get("dns_name", "")
+        value   = context.user_data.get("dns_value", "")
+        context.user_data.clear()
+        r   = await api_post(server, "/api/dns",
+                             json={"type": rtype, "name": name, "value": value, "proxied": proxied})
+        rid = r.get("id") if isinstance(r, dict) else None
+        pl  = "🟠 Proxied" if proxied else "⚪ DNS only"
+        msg = f"✅ *DNS Created*\n\n`{r.get('name', name)}`\n`{rtype}` · {pl}\n`{value}`"
+        rows = []
+        if rid: rows.append([InlineKeyboardButton("🗑 Delete", callback_data=f"del_dns_{rid}")])
+        rows.append([InlineKeyboardButton("🔙 DNS", callback_data="dns_menu")])
+        await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("del_dns_"):
+        await api_delete(server, f"/api/dns/{data[8:]}")
+        await q.edit_message_text("🗑 Record deleted.", reply_markup=kb_dns())
+
+    elif data == "dns_delete_pick":
+        records = await api_get(server, "/api/dns")
+        if not records:
+            await q.edit_message_text("ℹ️ No records", reply_markup=kb_dns()); return
+        context.user_data.update(dns_delete_records=records, action="dns_delete_pick")
+        CHUNK  = 20
+        chunks = [records[i:i+CHUNK] for i in range(0, len(records), CHUNK)]
+        for idx, batch in enumerate(chunks):
+            is_last = idx == len(chunks) - 1
+            lines   = [f"*🗑 Delete Record ({idx*CHUNK+1}–{idx*CHUNK+len(batch)} / {len(records)})*\n"]
+            for i, rec in enumerate(batch, idx*CHUNK+1):
+                pr = "🟠" if rec.get("proxied") else "⚪"
+                lines.append(f"`{i}.` {pr} `{rec['name']}` · *{rec['type']}*")
+            if is_last: lines.append("\n_Reply with record number_")
+            markup = kb([("❌ Cancel", "dns_menu")]) if is_last else None
+            if idx == 0: await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+            else:        await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # XRAY
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "xray_menu":
+        leave_menu()
+        inbounds = await api_get(server, "/api/xray/inbounds")
+        rows = []
+        if isinstance(inbounds, list):
+            for ib in inbounds:
+                tag   = ib.get("tag", "?")
+                proto = ib.get("protocol", "")
+                port  = ib.get("port", "")
+                rows.append([InlineKeyboardButton(
+                    f"📡 {tag} ({proto}:{port})", callback_data=f"xray_ib_{tag}")])
+        rows.append([InlineKeyboardButton("➕ Add Inbound", callback_data="xray_add_inbound"),
+                     InlineKeyboardButton("🔙 Menu",        callback_data="back_to_menu")])
+        await q.edit_message_text(
+            f"*⚡ Xray Inbounds* — {len(rows)-1} configured",
+            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("xray_ib_"):
+        tag     = data[8:]
+        users   = await api_get(server, f"/api/xray/inbounds/{tag}/users")
+        u_count = len(users) if isinstance(users, list) else 0
+        await q.edit_message_text(
+            f"*📡 Xray: {tag}*\n\n{u_count} user(s)", parse_mode="Markdown",
+            reply_markup=kb([("👥 Users",      f"xray_users_{tag}"),
+                             ("🗑 Del Inbound", f"xray_del_ib_{tag}")],
+                            [("🔙 Xray",        "xray_menu")]))
+
+    elif data.startswith("xray_users_"):
+        tag   = data[11:]
+        users = await api_get(server, f"/api/xray/inbounds/{tag}/users")
+        if not users:
+            await q.edit_message_text(f"ℹ️ No users in `{tag}`",
+                                      parse_mode="Markdown", reply_markup=kb_xray()); return
+        lines = [f"*👥 Xray — {tag}*\n"]
+        for u in users:
+            lines.append(f"• `{u.get('username','?')}` `{(u.get('id') or '')[:8]}…`")
+        rows = [[InlineKeyboardButton(f"➕ Add User", callback_data=f"xray_adduser_{tag}")]]
+        for u in users[:8]:
+            un = u.get("username", "")
+            rows.append([InlineKeyboardButton(f"🗑 {un}",
+                                              callback_data=f"xray_deluser_{tag}__{un}")])
+        rows.append([InlineKeyboardButton("🔙 Xray", callback_data="xray_menu")])
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(rows))
+
+    elif data.startswith("xray_adduser_"):
+        tag = data[13:]
+        context.user_data.update(action="xray_adduser", xray_tag=tag)
+        await q.edit_message_text(
+            f"*➕ Xray User — {tag}*\n\n"
+            "Send: `username [uuid] [flow]`\n"
+            "Leave uuid blank to auto-generate.\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_xray())
+
+    elif data.startswith("xray_del_ib_"):
+        tag = data[12:]
+        await api_delete(server, f"/api/xray/inbounds/{tag}")
+        await q.edit_message_text(f"🗑 Inbound `{tag}` deleted",
+                                  parse_mode="Markdown", reply_markup=kb_xray())
+
+    elif data.startswith("xray_deluser_"):
+        parts = data[13:].split("__", 1)
+        tag, un = parts[0], parts[1] if len(parts) > 1 else ""
+        await api_delete(server, f"/api/xray/inbounds/{tag}/users/{un}")
+        await q.edit_message_text(f"🗑 `{un}` removed from `{tag}`",
+                                  parse_mode="Markdown", reply_markup=kb_xray())
+
+    elif data == "xray_add_inbound":
+        context.user_data["action"] = "xray_add_inbound"
+        await q.edit_message_text(
+            "*➕ Add Xray Inbound*\n\n"
+            "Send a JSON inbound config:\n"
+            '```\n{"tag":"vless-in","protocol":"vless","port":443,"settings":{}}\n```'
+            "\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_xray())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SCOPE
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "scope_menu":
+        leave_menu()
+        scope = await api_get(server, "/api/scope")
+        lines = ["*🔧 Scope / Limits*\n",
+                 f"Max users:       `{scope.get('max_users') or '∞'}`",
+                 f"Default expiry:  `{scope.get('default_expiry') or 'none'} days`",
+                 f"Max expiry:      `{scope.get('max_expiry') or '∞'} days`",
+                 f"Max connections: `{scope.get('max_connections') or '∞'}`"]
+        svcs = scope.get("services") or {}
+        if svcs:
+            lines.append("\n*Services:*")
+            for svc, en in svcs.items():
+                lines.append(f"  {'✅' if en else '❌'} `{svc}`")
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+            reply_markup=kb([("✏️ Edit Scope", "scope_edit")],
+                            [("🔙 Menu",        "back_to_menu")]))
+
+    elif data == "scope_edit":
+        context.user_data["action"] = "scope_edit"
+        scope = await api_get(server, "/api/scope")
+        await q.edit_message_text(
+            "*✏️ Edit Scope*\n\nSend a JSON object:\n\n"
+            f"```\n{_json.dumps(scope, indent=2)}\n```\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_scope())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SERVERLIST  (API's registered server list)
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "serverlist_menu":
+        leave_menu()
+        prim     = primary_server(uid)
+        raw_list = await api_get(prim, "/api/serverlist")
+        context.user_data["api_serverlist"] = raw_list
+        lines = ["*🖧 API Serverlist*\n"]
+        for s in raw_list:
+            lines.append(f"• *{s.get('name','?')}* — `{s.get('url','?')}`")
+        if not raw_list: lines.append("_(empty)_")
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+            reply_markup=kb([("➕ Add",         "slst_add")],
+                            [("🗑 Remove",       "slst_remove")],
+                            [("🔄 Refresh Bot",  "slst_refresh_bot")],
+                            [("🔙 Menu",         "back_to_menu")]))
+
+    elif data == "slst_add":
+        context.user_data["action"] = "slst_add"
+        await q.edit_message_text(
+            "*➕ Add Server*\n\n"
+            "Send: `id name url token`\n\n"
+            "Example:\n`vps2 Germany http://1.2.3.4:51700 mytoken`\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_srvlist())
+
+    elif data == "slst_remove":
+        raw_list = context.user_data.get("api_serverlist") or []
+        if not raw_list:
+            await q.edit_message_text("ℹ️ Serverlist is empty", reply_markup=kb_srvlist()); return
+        context.user_data["action"] = "slst_remove"
+        lines = ["*🗑 Remove Server*\n"]
+        for i, s in enumerate(raw_list, 1):
+            lines.append(f"`{i}.` *{s.get('name','?')}* — `{s.get('url','?')}`")
+        lines.append("\n_Reply with the number to remove_")
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+                                  reply_markup=kb([("❌ Cancel", "serverlist_menu")]))
+
+    elif data == "slst_refresh_bot":
+        servers = await fetch_serverlist(sess["primary_token"])
+        sess["servers"] = servers
+        ids = {s["id"] for s in servers}
+        if sess.get("active_id") not in ids:
+            sess["active_id"] = servers[0]["id"] if servers else None
+        set_session(uid, sess)
+        await q.edit_message_text(
+            f"✅ Bot server list refreshed — {len(servers)} server(s)",
+            reply_markup=kb([("🖧 Serverlist", "serverlist_menu"), ("🔙 Menu", "back_to_menu")]))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TOKENS
+    # ══════════════════════════════════════════════════════════════════════════
+    elif data == "tokens_menu":
+        leave_menu()
+        prim   = primary_server(uid)
+        tokens = await api_get(prim, "/api/tokens")
+        context.user_data["token_list"] = tokens
+        lines = ["*🔑 Active Tokens*\n"]
+        for t in tokens:
+            lines.append(f"• `{t.get('label','?')}` — `{(t.get('token') or '')[:16]}…`")
+        if not tokens: lines.append("_(none)_")
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+            reply_markup=kb([("🗑 Revoke", "tokens_revoke_pick")],
+                            [("🔙 Menu",   "back_to_menu")]))
+
+    elif data == "tokens_revoke_pick":
+        tokens = context.user_data.get("token_list", [])
+        if not tokens:
+            await q.edit_message_text("ℹ️ No tokens", reply_markup=kb_menu()); return
+        context.user_data["action"] = "tokens_revoke"
+        lines = ["*🗑 Revoke Token*\n"]
+        for i, t in enumerate(tokens, 1):
+            lines.append(f"`{i}.` `{t.get('label','?')}`")
+        lines.append("\n_Reply with the number to revoke_")
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+                                  reply_markup=kb([("❌ Cancel", "tokens_menu")]))
+
+    else:
+        logger.warning("Unhandled callback: %s", data)
+
+
+# ── Message handler ───────────────────────────────────────────────────────────
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_admin(update): return
+    uid    = update.effective_user.id
+    action = context.user_data.get("action")
+    text   = (update.message.text or "").strip()
 
-    if update.message.document:
-        action = context.user_data.get("action")
-        if action not in ("restore_db", "sync_db"):
-            await update.message.reply_text("❌ Unexpected file", reply_markup=kb_menu()); return
-        if not update.message.document.file_name.endswith(".db"):
-            await update.message.reply_text("❌ Please send a .db file", reply_markup=kb_menu()); return
-        tmp = "uploaded_users.db"
-        await (await update.message.document.get_file()).download_to_drive(tmp)
-        if action == "restore_db":
-            import shutil as _sh
-            _sh.copy(tmp, cfg["DB_FILE"])
-            os.remove(tmp)
-            core.init_db()
-            core.sync()
-            await update.message.reply_text("✅ Database Restored", reply_markup=kb_menu())
-        else:
-            ok = core.sync_db(tmp)
-            os.remove(tmp)
-            await update.message.reply_text("✅ Database Synced" if ok else "❌ Invalid database file", reply_markup=kb_menu())
-        context.user_data.clear()
+    # ── Login flow — no session required ──────────────────────────────────────
+    if action == "login_username":
+        context.user_data.update(login_username=text, action="login_password")
+        await update.message.reply_text("🔒 Send your password:\n\n/cancel to abort")
         return
 
-    action = context.user_data.get("action")
-    if not action and "user_list" in context.user_data:
+    if action == "login_password":
+        username = context.user_data.pop("login_username", "")
+        context.user_data.pop("action", None)
+        msg = await update.message.reply_text("⏳ Logging in…")
         try:
-            idx  = int(update.message.text.strip()) - 1
-            user = core.get_user(context.user_data["user_list"][idx]["username"])
-            if not user:
-                await update.message.reply_text("❌ User not found", reply_markup=kb_users()); return
-            await update.message.reply_text(fmt_user(user), parse_mode="Markdown",
-                reply_markup=kb_user_actions(user["username"], user["temporary"], user["status"] == "Active"))
-            return
-        except (ValueError, IndexError): pass
+            token   = await do_login(PRIMARY_URL, username, text)
+            servers = await fetch_serverlist(token)
+
+            # Make sure there's always a primary entry
+            has_primary = any(s.get("url","").rstrip("/") == PRIMARY_URL for s in servers)
+            if not has_primary:
+                servers.insert(0, {"id": "__primary__", "name": "Primary",
+                                   "url": PRIMARY_URL, "token": token})
+
+            sess = {"primary_token": token, "servers": servers,
+                    "active_id": servers[0]["id"] if servers else None}
+            set_session(uid, sess)
+            await msg.edit_text(
+                f"✅ Logged in as *{username}*\n{len(servers)} server(s) available.",
+                parse_mode="Markdown")
+            await show_menu(update, context)
+        except ApiError as e:
+            await msg.edit_text(f"❌ Login failed: `{e.detail}`", parse_mode="Markdown")
+        return
+
+    # Session required for everything else
+    sess = get_session(uid)
+    if not sess:
+        await update.message.reply_text("Please /login first."); return
+
+    server = active_server(uid)
+    if not server:
+        await update.message.reply_text("No active server. Use /login."); return
+
+    # ── File upload ───────────────────────────────────────────────────────────
+    if update.message.document:
+        if action not in ("restore_db", "merge_db"):
+            await update.message.reply_text("❌ Unexpected file", reply_markup=kb_menu()); return
+        if not update.message.document.file_name.endswith(".db"):
+            await update.message.reply_text("❌ Send a .db file", reply_markup=kb_menu()); return
+        tg_file = await update.message.document.get_file()
+        buf = io.BytesIO()
+        await tg_file.download_to_memory(buf); buf.seek(0)
+        endpoint = "/api/restore-db" if action == "restore_db" else "/api/merge-db"
+        try:
+            form = aiohttp.FormData()
+            form.add_field("file", buf, filename="users.db",
+                           content_type="application/octet-stream")
+            await api_post(server, endpoint, data=form)
+            verb = "Restored" if action == "restore_db" else "Merged"
+            await update.message.reply_text(f"✅ Database {verb}", reply_markup=kb_menu())
+        except ApiError as e:
+            await update.message.reply_text(f"❌ {e.detail}", reply_markup=kb_menu())
+        context.user_data.clear(); return
 
     if not action:
         await update.message.reply_text("Use /start", reply_markup=kb_menu()); return
 
-    text = update.message.text.strip()
-
-    # ── DNS text input steps ───────────────────────────────────────────────────
-
-    if action == "dns_delete_pick":
-        try:
-            idx = int(text) - 1
-            records = context.user_data.get("dns_delete_records", [])
-            if idx < 0 or idx >= len(records):
-                await update.message.reply_text("❌ Invalid number", reply_markup=kb_dns())
-                context.user_data.clear()
-                return
-            record = records[idx]
-            result = dns.delete_record(record["id"])
-            if result.get("success"):
-                await update.message.reply_text(
-                    f"🗑 Deleted `{record['name']}` ({record['type']})",
-                    parse_mode="Markdown", reply_markup=kb_dns())
-            else:
-                await update.message.reply_text("❌ Could not delete record", reply_markup=kb_dns())
-        except ValueError:
-            await update.message.reply_text("❌ Send a number", reply_markup=kb_dns())
+    try:
+        await _handle_text(update, context, uid, server, sess, action, text)
+    except ApiError as e:
+        await update.message.reply_text(f"❌ API {e.status}:\n`{e.detail}`",
+                                        parse_mode="Markdown", reply_markup=kb_menu())
         context.user_data.clear()
-        return
 
-    if action == "dns_name":
-        cf_domain = cfg.get("CF_ROOT_DOMAIN") or cfg.get("DOMAIN", "")
-        name = text.lower().replace(f".{cf_domain}", "")
-        context.user_data.update(dns_name=name, action="dns_value")
-        rtype = context.user_data.get("dns_rtype", "A")
-        hint = {
-            "A":     "IPv4 address (e.g. `1.2.3.4`)",
-            "AAAA":  "IPv6 address",
-            "CNAME": "target hostname (e.g. `myapp.vercel.app`)",
-            "TXT":   "text value",
-            "MX":    "mail server hostname",
-        }.get(rtype, "value")
-        await update.message.reply_text(
-            f"Subdomain: *{name}.{cf_domain}*\n\nEnter {hint}:\n\n/cancel to go back",
-            parse_mode="Markdown")
-        return
 
-    if action == "dns_value":
-        rtype = context.user_data.get("dns_rtype", "A")
-        context.user_data.update(dns_value=text, action=None)
-        if rtype in dns.NO_PROXY_TYPES:
-            name    = context.user_data.get("dns_name", "")
-            proxied = False
-            result  = dns.create_record(rtype, name, text, proxied)
-            if result.get("success"):
-                rec = result["result"]
-                rid = rec["id"]
-                msg = (
-                    f"✅ *Record Created*\n\n"
-                    f"`{rec['name']}`\n"
-                    f"Type: `{rtype}` · ⚪ DNS only\n"
-                    f"Value: `{text}`"
-                )
-                kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🗑 Delete this record", callback_data=f"del_dns_{rid}")],
-                    [InlineKeyboardButton("🔙 DNS",               callback_data="dns_menu")],
-                ])
-            else:
-                errors = result.get("errors", [])
-                msg    = f"❌ Failed: {errors[0].get('message') if errors else 'Unknown error'}"
-                kb     = kb_dns()
-            context.user_data.clear()
-            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb)
-        else:
-            await update.message.reply_text(
-                "Proxy through Cloudflare?",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🟠 Proxied (CDN)", callback_data="dnsproxy_yes"),
-                     InlineKeyboardButton("⚪ DNS only",      callback_data="dnsproxy_no")],
-                    [InlineKeyboardButton("❌ Cancel",         callback_data="dns_menu")],
-                ]))
-        return
-
-    # ── existing text input steps ──────────────────────────────────────────────
+async def _handle_text(update, context, uid, server, sess, action, text):  # noqa: C901
 
     if action == "add_user":
-        parts = text.split()
-        username, days, temporary, password, max_logins = parts[0], None, False, None, None
+        parts    = text.split()
+        username = parts[0]
+        days, temporary, password, max_logins = None, False, None, None
         rest = []
         for p in parts[1:]:
-            if p.startswith("pwd:"):    password = p[4:]
+            if   p.startswith("pwd:"):   password = p[4:]
             elif p.startswith("limit:"):
-                try:
-                    max_logins = int(p[6:])
-                    if max_logins <= 0: raise ValueError
-                except ValueError:
-                    await update.message.reply_text("❌ Invalid limit", reply_markup=kb_menu()); return
+                try:    max_logins = int(p[6:]); assert max_logins > 0
+                except: await update.message.reply_text("❌ Invalid limit"); return
             else: rest.append(p)
         if rest:
             try: days = int(rest[0])
             except ValueError:
-                if rest[0].lower() in ("temp", "temporary", "t"): temporary = True
-                else:
-                    await update.message.reply_text(
-                        "❌ Invalid format\n\nExamples:\n`user` `user 30` `user pwd:pass` `user 7 temp` `user limit:2`",
-                        parse_mode="Markdown", reply_markup=kb_menu()); return
-        if len(rest) >= 2 and rest[1].lower() in ("temp", "temporary", "t"):
+                if rest[0].lower() in ("temp","temporary","t"): temporary = True
+                else: await update.message.reply_text("❌ Invalid format"); return
+        if len(rest) >= 2 and rest[1].lower() in ("temp","temporary","t"):
             temporary = True
-
-        ok, pwd, expires, linux_ok, err = core.add_user(username, password, days, temporary, max_logins)
-        if ok:
-            exp_text = expires[:10] if expires else "Never"
-            msg = f"✅ *{'Temp' if temporary else 'User'} Added*\n\n`{username}` • `{pwd}`\nExpires: {exp_text}"
-            if max_logins: msg += f"\nMax Logins: {max_logins}"
-            if not linux_ok: msg += "\n\n⚠️ Linux user creation failed"
-            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb_menu())
-        else:
-            await update.message.reply_text(
-                "❌ Password already in use" if err == "password_exists" else "❌ Username exists",
-                reply_markup=kb_menu())
+        payload = {"username": username, "temporary": temporary}
+        if days:       payload["days"]       = days
+        if password:   payload["password"]   = password
+        if max_logins: payload["max_logins"] = max_logins
+        r = await api_post(server, "/api/users", json=payload)
+        msg = (f"✅ *{'Temp' if temporary else 'User'} Added*\n\n"
+               f"`{r['username']}` • `{r['password']}`\n"
+               f"Expires: {r.get('expires') or 'Never'}")
+        if r.get("max_logins"): msg += f"\nMax Logins: {r['max_logins']}"
+        if not r.get("linux_ok", True): msg += "\n\n⚠️ Linux user creation failed"
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb_menu())
         context.user_data.clear()
 
     elif action == "set_maxlogins":
-        try:
-            username = context.user_data.get("maxlogins_username")
-            if not username: raise ValueError("❌ Session expired")
-            n = int(text)
-            if n < 0: raise ValueError("❌ Invalid number")
-            limit = None if n == 0 else n
-            context.user_data.clear()
-            if core.set_maxlogins(username, limit):
-                user  = core.get_user(username)
-                label = "♾️ Unlimited" if limit is None else f"🔒 {limit} max"
-                if user:
-                    await update.message.reply_text(
-                        fmt_user(user) + f"\n\n✅ Max logins → {label}", parse_mode="Markdown",
-                        reply_markup=kb_user_actions(username, user["temporary"], user["status"] == "Active"))
-                else:
-                    await update.message.reply_text("❌ User not found", reply_markup=kb_users())
-            else:
-                await update.message.reply_text("❌ Failed", reply_markup=kb_users())
-        except (ValueError, TypeError) as e:
-            await update.message.reply_text(str(e) if str(e).startswith("❌") else "❌ Send a number (0 to remove)", reply_markup=kb_users())
-            context.user_data.clear()
+        un = context.user_data.pop("maxlogins_username", None)
+        if not un:
+            await update.message.reply_text("❌ Session expired"); context.user_data.clear(); return
+        try:    n = int(text); assert n >= 0
+        except: await update.message.reply_text("❌ Send a number (0 = unlimited)"); context.user_data.clear(); return
+        limit = None if n == 0 else n
+        await api_post(server, f"/api/users/{un}/maxlogins", json={"max_logins": limit})
+        label = "♾️ Unlimited" if limit is None else f"🔒 {limit} max"
+        await update.message.reply_text(f"✅ `{un}` → {label}",
+                                        parse_mode="Markdown", reply_markup=kb_users())
+        context.user_data.clear()
 
     elif action == "change_password_custom":
-        username = context.user_data.get("change_password_username")
-        ok, old, err = core.change_password(username, text)
-        if ok:
-            await update.message.reply_text(f"✅ *Password Changed*\n\n`{username}`\n`{old}` → `{text}`",
-                                             parse_mode="Markdown", reply_markup=kb_users())
-        else:
-            await update.message.reply_text(
-                "❌ Password already in use" if err == "password_exists" else "❌ User not found",
-                reply_markup=kb_users())
+        un = context.user_data.pop("change_password_username", None)
+        r  = await api_post(server, f"/api/users/{un}/password", json={"password": text})
+        await update.message.reply_text(
+            f"✅ *Password Changed*\n\n`{un}`\n`{r['old_password']}` → `{r['new_password']}`",
+            parse_mode="Markdown", reply_markup=kb_users())
         context.user_data.clear()
 
     elif action in ("modify_expiry_set", "modify_expiry_extend"):
-        try:
-            username = context.user_data.get("modify_expiry_username")
-            if not username: raise ValueError("❌ Session expired")
-            days = parse_positive_int(text)
-            ok, new_exp = core.modify_expiry(username, days, extend=(action == "modify_expiry_extend"))
-            if ok:
-                prefix = f"Extended +{days}d" if action == "modify_expiry_extend" else "Expiry Set"
-                await update.message.reply_text(f"✅ *{prefix}*\n\n`{username}`\n{new_exp[:10]}",
-                                                 parse_mode="Markdown", reply_markup=kb_users())
-            else:
-                await update.message.reply_text("❌ Failed", reply_markup=kb_users())
-        except ValueError as e:
-            await update.message.reply_text(str(e), reply_markup=kb_users())
-        finally:
-            context.user_data.clear()
+        un = context.user_data.pop("modify_expiry_username", None)
+        if not un:
+            await update.message.reply_text("❌ Session expired"); context.user_data.clear(); return
+        try:    days = int(text); assert days > 0
+        except: await update.message.reply_text("❌ Must be a positive number"); context.user_data.clear(); return
+        extend = action == "modify_expiry_extend"
+        r = await api_post(server, f"/api/users/{un}/expiry",
+                           json={"days": days, "extend": extend})
+        prefix = f"Extended +{days}d" if extend else "Expiry Set"
+        await update.message.reply_text(
+            f"✅ *{prefix}*\n\n`{un}`\n{(r.get('expires') or '')[:10]}",
+            parse_mode="Markdown", reply_markup=kb_users())
+        context.user_data.clear()
 
+    elif action == "dns_name":
+        context.user_data.update(dns_name=text.lower(), action="dns_value")
+        rtype = context.user_data.get("dns_rtype", "A")
+        hint  = {"A":"IPv4","AAAA":"IPv6","CNAME":"target hostname",
+                 "TXT":"text value","MX":"mail server"}.get(rtype, "value")
+        await update.message.reply_text(
+            f"Subdomain: *{text.lower()}*\n\nEnter {hint}:\n\n/cancel to go back",
+            parse_mode="Markdown")
+
+    elif action == "dns_value":
+        NO_PROXY = {"TXT","MX","NS","SRV","CAA"}
+        rtype = context.user_data.get("dns_rtype", "A")
+        name  = context.user_data.get("dns_name", "")
+        context.user_data.update(dns_value=text, action=None)
+        if rtype in NO_PROXY:
+            r   = await api_post(server, "/api/dns",
+                                 json={"type": rtype, "name": name, "value": text, "proxied": False})
+            rid = r.get("id") if isinstance(r, dict) else None
+            msg = f"✅ *DNS Created*\n\n`{r.get('name',name)}`\n`{rtype}` · ⚪\n`{text}`"
+            rows = []
+            if rid: rows.append([InlineKeyboardButton("🗑 Delete", callback_data=f"del_dns_{rid}")])
+            rows.append([InlineKeyboardButton("🔙 DNS", callback_data="dns_menu")])
+            await update.message.reply_text(msg, parse_mode="Markdown",
+                                            reply_markup=InlineKeyboardMarkup(rows))
+            context.user_data.clear()
+        else:
+            await update.message.reply_text(
+                "Proxy through Cloudflare?",
+                reply_markup=kb([("🟠 Proxied", "dnsproxy_yes"), ("⚪ DNS only", "dnsproxy_no")],
+                                [("❌ Cancel",  "dns_menu")]))
+
+    elif action == "dns_delete_pick":
+        try:
+            idx     = int(text) - 1
+            records = context.user_data.get("dns_delete_records", [])
+            if not (0 <= idx < len(records)):
+                await update.message.reply_text("❌ Invalid number", reply_markup=kb_dns())
+                context.user_data.clear(); return
+            rec = records[idx]
+            await api_delete(server, f"/api/dns/{rec['id']}")
+            await update.message.reply_text(
+                f"🗑 Deleted `{rec['name']}` ({rec['type']})",
+                parse_mode="Markdown", reply_markup=kb_dns())
+        except ValueError:
+            await update.message.reply_text("❌ Send a number", reply_markup=kb_dns())
+        context.user_data.clear()
+
+    elif action == "file_write":
+        fname = context.user_data.pop("file_editing", None)
+        if not fname:
+            await update.message.reply_text("❌ Session expired"); context.user_data.clear(); return
+        await api_put(server, f"/api/files/{fname}", json=text)
+        await update.message.reply_text(f"✅ *{fname}* saved",
+                                        parse_mode="Markdown", reply_markup=kb_files())
+        context.user_data.clear()
+
+    elif action == "xray_adduser":
+        tag   = context.user_data.pop("xray_tag", None)
+        parts = text.split()
+        un    = parts[0]
+        uid_v = parts[1] if len(parts) > 1 else None
+        flow  = parts[2] if len(parts) > 2 else ""
+        payload = {"username": un, "flow": flow}
+        if uid_v: payload["uid"] = uid_v
+        r = await api_post(server, f"/api/xray/inbounds/{tag}/users", json=payload)
+        await update.message.reply_text(
+            f"✅ `{un}` added to `{tag}`\nUUID: `{r.get('id','?')}`",
+            parse_mode="Markdown", reply_markup=kb_xray())
+        context.user_data.clear()
+
+    elif action == "xray_add_inbound":
+        try:    inbound = _json.loads(text)
+        except: await update.message.reply_text("❌ Invalid JSON"); context.user_data.clear(); return
+        r = await api_post(server, "/api/xray/inbounds", json=inbound)
+        await update.message.reply_text(f"✅ Inbound `{r.get('tag','?')}` added",
+                                        parse_mode="Markdown", reply_markup=kb_xray())
+        context.user_data.clear()
+
+    elif action == "scope_edit":
+        try:    obj = _json.loads(text)
+        except: await update.message.reply_text("❌ Invalid JSON"); context.user_data.clear(); return
+        await api_post(server, "/api/scope", json=obj)
+        await update.message.reply_text("✅ Scope updated", reply_markup=kb_scope())
+        context.user_data.clear()
+
+    elif action == "slst_add":
+        parts = text.split(maxsplit=3)
+        if len(parts) < 3:
+            await update.message.reply_text("❌ Format: `id name url [token]`",
+                                            parse_mode="Markdown"); return
+        sid, name, url = parts[0], parts[1], parts[2]
+        tok  = parts[3] if len(parts) > 3 else None
+        prim = primary_server(uid)
+        existing = await api_get(prim, "/api/serverlist")
+        existing.append({"id": sid, "name": name, "url": url, "token": tok})
+        await api_post(prim, "/api/serverlist", json={"servers": existing})
+        await update.message.reply_text(f"✅ *{name}* added to serverlist",
+                                        parse_mode="Markdown", reply_markup=kb_srvlist())
+        context.user_data.clear()
+
+    elif action == "slst_remove":
+        raw_list = context.user_data.get("api_serverlist", [])
+        try:
+            idx = int(text) - 1
+            if not (0 <= idx < len(raw_list)):
+                await update.message.reply_text("❌ Invalid number"); context.user_data.clear(); return
+            removed = raw_list.pop(idx)
+            prim    = primary_server(uid)
+            await api_post(prim, "/api/serverlist", json={"servers": raw_list})
+            await update.message.reply_text(
+                f"🗑 Removed *{removed.get('name','?')}*",
+                parse_mode="Markdown", reply_markup=kb_srvlist())
+        except ValueError:
+            await update.message.reply_text("❌ Send a number")
+        context.user_data.clear()
+
+    elif action == "tokens_revoke":
+        tokens = context.user_data.get("token_list", [])
+        try:
+            idx = int(text) - 1
+            if not (0 <= idx < len(tokens)):
+                await update.message.reply_text("❌ Invalid number"); context.user_data.clear(); return
+            tok  = tokens[idx]["token"]
+            prim = primary_server(uid)
+            await api_delete(prim, "/api/tokens", json={"token": tok})
+            await update.message.reply_text(
+                f"✅ Token `{tokens[idx].get('label','?')}` revoked",
+                parse_mode="Markdown", reply_markup=kb_menu())
+        except ValueError:
+            await update.message.reply_text("❌ Send a number")
+        context.user_data.clear()
+
+    else:
+        await update.message.reply_text("Use /start", reply_markup=kb_menu())
+
+
+# ── Error handler ─────────────────────────────────────────────────────────────
 
 async def on_error(update, context):
-    logger.error(f"Update {update} caused error {context.error}")
+    logger.error("Update %s caused error", update, exc_info=context.error)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    if not TOKEN:
-        print("❌ TOKEN not set"); return
+    if not BOT_TOKEN:
+        print("❌ telegram_bot.token not set in config.yaml"); return
 
-    core.init_db()
-    r = core.sync()
-    logger.info(f"Started. {r['deleted_count']} expired users cleaned.")
-
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start",  cmd_start))
-    app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start",   cmd_start))
+    app.add_handler(CommandHandler("cancel",  cmd_cancel))
+    app.add_handler(CommandHandler("login",   cmd_login))
+    app.add_handler(CommandHandler("logout",  cmd_logout))
+    app.add_handler(CommandHandler("servers", cmd_servers))
     app.add_handler(CallbackQueryHandler(on_button))
-    app.add_handler(MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, on_message))
+    app.add_handler(MessageHandler(
+        (filters.TEXT & ~filters.COMMAND) | filters.Document.ALL,
+        on_message))
     app.add_error_handler(on_error)
 
-    for k, v in [("Domain", DOMAIN), ("DNSTT", DNSTT), ("Key", KEY)]:
-        if v: logger.info(f"{k}: {v}")
-
+    logger.info("Bot starting. Primary: %s", PRIMARY_URL)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

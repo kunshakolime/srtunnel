@@ -85,14 +85,16 @@ async function loadUsers() {
           <span class="conn-dot"></span>${u.connections || 0}
         </span>
       </td>
+      <td style="font-family:var(--font-mono);font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
       <td onclick="event.stopPropagation()">
         <div style="display:flex;gap:6px">
+          <button class="btn-sm btn-icon" title="Copy UUID" onclick="copyToClipboard('${u.uuid || ''}')">📋</button>
           <button class="btn-sm btn-icon" title="Edit" onclick="openUserPanel('${u.username}')">✎</button>
           <button class="btn-danger btn-icon" title="Delete" onclick="deleteUser('${u.username}')">✕</button>
         </div>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="9" class="empty-state">No users found</td></tr>';
+  `).join('') || '<tr><td colspan="10" class="empty-state">No users found</td></tr>';
 }
 
 async function doSync() {
@@ -313,42 +315,71 @@ async function doSaveServices() {
 
 async function loadXray() {
   try {
-    const res = await apiFetch('/api/users');
-    if (!res.ok) {
-      const err = await res.text();
-      document.getElementById('xrayContent').innerHTML = `
-        <div class="card" style="text-align:center;padding:40px">
-          <p style="color:var(--text3)">Failed to load Xray users</p>
-        </div>
-      `;
-      toast('Xray page load failed', 'err');
-      console.error('loadXray failed:', res.status, err);
-      return;
+    // Load xray.json config
+    const configRes = await apiFetch('/api/files/xray.json');
+    let config = null;
+    if (configRes.ok) {
+      const configData = await configRes.json();
+      config = JSON.parse(configData.content);
     }
-    const users = await res.json();
+
+    // Load inbounds
+    const inboundsRes = await apiFetch('/api/xray/inbounds');
+    let inbounds = [];
+    if (inboundsRes.ok) {
+      inbounds = await inboundsRes.json();
+    }
+
+    // Load users
+    const usersRes = await apiFetch('/api/users');
+    let users = [];
+    if (usersRes.ok) {
+      users = await usersRes.json();
+    }
     const xrayUsers = users.filter(u => u.services && u.services.includes('xray'));
-    
-    if (!xrayUsers.length) {
-      document.getElementById('xrayContent').innerHTML = `
-        <div class="card" style="text-align:center;padding:40px">
-          <p style="color:var(--text3)">No users with Xray service</p>
-        </div>
-      `;
-      return;
-    }
-    
+
     document.getElementById('xrayContent').innerHTML = `
       <div class="card">
-        <h4>Xray Users</h4>
+        <h4>Xray Configuration</h4>
+        <div style="margin-bottom:20px">
+          <button class="btn" onclick="editXrayConfig()">Edit Config</button>
+          <button class="btn" onclick="addXrayInbound()">Add Inbound</button>
+        </div>
+        
+        <h5>Inbounds</h5>
         <div class="table-wrap">
           <table>
             <thead><tr>
-              <th>Username</th><th>Status</th><th>Expiry</th><th>Connections</th>
+              <th>Tag</th><th>Protocol</th><th>Port</th><th>Users</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="xrayInboundsBody">
+              ${inbounds.map(ib => `
+                <tr>
+                  <td><strong>${ib.tag}</strong></td>
+                  <td>${ib.protocol}</td>
+                  <td>${ib.port || '—'}</td>
+                  <td>${ib.users ? ib.users.length : 0}</td>
+                  <td>
+                    <button class="btn-sm" onclick="viewInboundUsers('${ib.tag}')">Users</button>
+                    <button class="btn-sm btn-danger" onclick="removeInbound('${ib.tag}')">Remove</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <h5>Xray Users (${xrayUsers.length})</h5>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Username</th><th>UUID</th><th>Status</th><th>Expiry</th><th>Connections</th>
             </tr></thead>
             <tbody>
               ${xrayUsers.map(u => `
                 <tr>
                   <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
+                  <td style="font-family:var(--font-mono);font-size:11px" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
                   <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
                   <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
                   <td><span class="conn-badge"><span class="conn-dot"></span>${u.connections || 0}</span></td>
@@ -361,5 +392,223 @@ async function loadXray() {
     `;
   } catch (e) {
     console.error('Xray load error', e);
+    document.getElementById('xrayContent').innerHTML = `
+      <div class="card" style="text-align:center;padding:40px">
+        <p style="color:var(--text3)">Failed to load Xray data</p>
+      </div>
+    `;
+  }
+}
+
+async function editXrayConfig() {
+  const res = await apiFetch('/api/files/xray.json');
+  if (!res.ok) {
+    toast('Failed to load config', 'err');
+    return;
+  }
+  const data = await res.json();
+  const uniqueId = 'xrayConfigModal-' + Date.now();
+  const modal = document.createElement('div');
+  modal.id = uniqueId;
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content" style="width:90%; max-width:1200px; height:80vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <h3>Edit Xray Config</h3>
+        <button class="modal-close" onclick="closeXrayModal('${uniqueId}')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="xrayConfigEditor-${uniqueId}" style="width:100%; flex-grow:1; min-height:500px; font-family:monospace; font-size:13px; padding:15px; resize:none;">${data.content}</textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="saveXrayConfig('${uniqueId}')">Save</button>
+        <button class="btn-secondary" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.classList.add('open');
+  modal.addEventListener('click', e => { if (e.target === modal) closeXrayModal(uniqueId); });
+}
+
+async function saveXrayConfig(modalId) {
+  const content = document.getElementById('xrayConfigEditor-' + modalId).value;
+  
+  try {
+    // Optional: Validate JSON locally before sending
+    JSON.parse(content);
+
+    const res = await apiFetch('/api/files/xray.json', {
+      method: 'PUT',
+      headers: {
+        // Force text/plain so FastAPI treats the body as a single string
+        'Content-Type': 'text/plain' 
+      },
+      body: content // Send the raw string from the textarea
+    });
+
+    if (res.ok) {
+      toast('Config saved successfully', 'ok');
+      closeXrayModal(modalId);
+      if (typeof loadXray === 'function') loadXray();
+    } else {
+      const err = await res.json();
+      // Handle the detail object to avoid [object Object]
+      const msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+      toast('Save failed: ' + msg, 'err');
+    }
+  } catch (e) {
+    toast('Invalid JSON format: ' + e.message, 'err');
+  }
+}
+
+function closeXrayModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) {
+    modal.classList.remove('open');
+    setTimeout(() => modal.remove(), 200);
+  }
+}
+
+async function addXrayInbound() {
+  const uniqueId = 'addInboundModal-' + Date.now();
+  const modal = document.createElement('div');
+  modal.id = uniqueId;
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add Xray Inbound</h3>
+        <button class="modal-close" onclick="closeXrayModal('${uniqueId}')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Tag:</label>
+          <input type="text" id="inboundTag-${uniqueId}" placeholder="e.g., vless-inbound">
+        </div>
+        <div class="form-group">
+          <label>Protocol:</label>
+          <select id="inboundProtocol-${uniqueId}">
+            <option value="vless">VLESS</option>
+            <option value="vmess">VMess</option>
+            <option value="trojan">Trojan</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Port:</label>
+          <input type="number" id="inboundPort-${uniqueId}" placeholder="443">
+        </div>
+        <div class="form-group">
+          <label>Listen Address:</label>
+          <input type="text" id="inboundListen-${uniqueId}" value="0.0.0.0">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="doAddInbound('${uniqueId}')">Add</button>
+        <button class="btn-secondary" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.classList.add('open');
+  modal.addEventListener('click', e => { if (e.target === modal) closeXrayModal(uniqueId); });
+}
+
+async function doAddInbound(modalId) {
+  const inbound = {
+    tag: document.getElementById('inboundTag-' + modalId).value.trim(),
+    protocol: document.getElementById('inboundProtocol-' + modalId).value,
+    port: parseInt(document.getElementById('inboundPort-' + modalId).value),
+    listen: document.getElementById('inboundListen-' + modalId).value,
+    settings: {},
+    streamSettings: {}
+  };
+  
+  if (!inbound.tag || !inbound.port) {
+    toast('Tag and port required', 'err');
+    return;
+  }
+  
+  const res = await apiFetch('/api/xray/inbounds', {
+    method: 'POST',
+    body: JSON.stringify(inbound)
+  });
+  const data = await res.json();
+  if (res.ok) {
+    toast('Inbound added');
+    closeXrayModal(modalId);
+    loadXray();
+  } else {
+    toast(data.detail || 'Failed to add inbound', 'err');
+  }
+}
+
+async function removeInbound(tag) {
+  if (!confirm(`Remove inbound "${tag}"?`)) return;
+  const res = await apiFetch(`/api/xray/inbounds/${tag}`, { method: 'DELETE' });
+  if (res.ok) {
+    toast('Inbound removed');
+    loadXray();
+  } else {
+    const data = await res.json();
+    toast(data.detail || 'Failed to remove', 'err');
+  }
+}
+
+async function viewInboundUsers(tag) {
+  const res = await apiFetch(`/api/xray/inbounds/${tag}/users`);
+  if (!res.ok) {
+    toast('Failed to load users', 'err');
+    return;
+  }
+  const users = await res.json();
+  const uniqueId = 'viewUsersModal-' + Date.now();
+  const modal = document.createElement('div');
+  modal.id = uniqueId;
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Users in ${tag}</h3>
+        <button class="modal-close" onclick="closeXrayModal('${uniqueId}')">&times;</button>
+      </div>
+      <div class="modal-body">
+        ${users.length ? `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Username</th><th>ID</th></tr></thead>
+              <tbody>
+                ${users.map(u => `<tr><td>${u.username}</td><td style="font-family:monospace;font-size:12px">${u.id}</td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : '<p>No users in this inbound</p>'}
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeXrayModal('${uniqueId}')">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.classList.add('open');
+  modal.addEventListener('click', e => { if (e.target === modal) closeXrayModal(uniqueId); });
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+async function copyToClipboard(text) {
+  if (!text) { toast('No UUID to copy', 'err'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('UUID copied to clipboard');
+  } catch (e) {
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    toast('UUID copied to clipboard');
   }
 }

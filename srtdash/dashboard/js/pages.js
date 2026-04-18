@@ -82,7 +82,8 @@ async function loadServices() {
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             ${s.running
-              ? `<button class="btn-sm" onclick="svcAction('${s.name}','restart')">↺ Restart</button>
+              ? `<button class="btn-sm" onclick="svcAction('${s.name}','reload')">⟲ Reload</button>
+                 <button class="btn-sm" onclick="svcAction('${s.name}','restart')">↺ Restart</button>
                  <button class="btn-danger btn-icon" onclick="svcAction('${s.name}','stop')">■ Stop</button>`
               : `<button class="btn-green btn-sm" onclick="svcAction('${s.name}','start')">▶ Start</button>`
             }
@@ -427,5 +428,35 @@ async function revokeToken(token, btn) {
     toast('Failed to revoke', 'err');
     btn.disabled = false;
     btn.textContent = 'Revoke';
+  }
+}
+
+// ── Service Actions ───────────────────────────────────────────────────────────
+
+async function svcAction(name, action) {
+  const res = await apiFetch(`/api/services/${name}/${action}`, { method: 'POST' });
+  if (res.ok) {
+    const d = await res.json();
+    const actionDisplay = d.action || action.charAt(0).toUpperCase() + action.slice(1);
+    toast(`${actionDisplay}: ${d.status}`);
+    loadServices();
+  } else {
+    const d = await res.json();
+    toast(d.detail || `${action} failed`, 'err');
+  }
+}
+
+async function setSvcStatus(name, status) {
+  const res = await apiFetch(`/api/services/${name}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status })
+  });
+  if (res.ok) {
+    const d = await res.json();
+    toast(`Status set to ${d.status}`);
+    loadServices();
+  } else {
+    const d = await res.json();
+    toast(d.detail || 'Status change failed', 'err');
   }
 }
