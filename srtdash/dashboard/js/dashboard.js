@@ -476,36 +476,31 @@ async function addXrayInbound() {
   modal.id = uniqueId;
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>Add Xray Inbound</h3>
-        <button class="modal-close" onclick="closeXrayModal('${uniqueId}')">&times;</button>
+    <div class="modal-box">
+      <h4>Add Xray Inbound</h4>
+      <div class="form-row">
+        <label>Tag</label>
+        <input type="text" id="inboundTag-${uniqueId}" placeholder="e.g., vless-inbound">
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Tag:</label>
-          <input type="text" id="inboundTag-${uniqueId}" placeholder="e.g., vless-inbound">
-        </div>
-        <div class="form-group">
-          <label>Protocol:</label>
-          <select id="inboundProtocol-${uniqueId}">
-            <option value="vless">VLESS</option>
-            <option value="vmess">VMess</option>
-            <option value="trojan">Trojan</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Port:</label>
-          <input type="number" id="inboundPort-${uniqueId}" placeholder="443">
-        </div>
-        <div class="form-group">
-          <label>Listen Address:</label>
-          <input type="text" id="inboundListen-${uniqueId}" value="0.0.0.0">
-        </div>
+      <div class="form-row">
+        <label>Protocol</label>
+        <select id="inboundProtocol-${uniqueId}">
+          <option value="vless">VLESS</option>
+          <option value="vmess">VMess</option>
+          <option value="trojan">Trojan</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Port</label>
+        <input type="number" id="inboundPort-${uniqueId}" placeholder="443">
+      </div>
+      <div class="form-row">
+        <label>Listen Address</label>
+        <input type="text" id="inboundListen-${uniqueId}" value="0.0.0.0">
       </div>
       <div class="modal-footer">
+        <button class="btn-sm" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
         <button class="btn" onclick="doAddInbound('${uniqueId}')">Add</button>
-        <button class="btn-secondary" onclick="closeXrayModal('${uniqueId}')">Cancel</button>
       </div>
     </div>
   `;

@@ -259,24 +259,24 @@
     <div class="form-row"><label>Max Logins</label><input id="nu_maxlogins" type="number" placeholder="Leave blank = unlimited"></div>
     <div class="form-row">
       <label>Services</label>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-        <div class="form-check">
-          <input type="checkbox" id="nu_svc_ssh" checked>
-          <label for="nu_svc_ssh">SSH / Dropbear</label>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px">
+        <div class="toggle-row">
+          <span>SSH / Dropbear</span>
+          <label class="toggle"><input type="checkbox" id="nu_svc_ssh" checked><span class="toggle-slider"></span></label>
         </div>
-        <div class="form-check">
-          <input type="checkbox" id="nu_svc_zivpn" checked>
-          <label for="nu_svc_zivpn">ZiVPN</label>
+        <div class="toggle-row">
+          <span>ZiVPN</span>
+          <label class="toggle"><input type="checkbox" id="nu_svc_zivpn" checked><span class="toggle-slider"></span></label>
         </div>
-        <div class="form-check">
-          <input type="checkbox" id="nu_svc_xray" checked>
-          <label for="nu_svc_xray">Xray</label>
+        <div class="toggle-row">
+          <span>Xray</span>
+          <label class="toggle"><input type="checkbox" id="nu_svc_xray" checked><span class="toggle-slider"></span></label>
         </div>
       </div>
     </div>
-    <div class="form-check">
-      <input type="checkbox" id="nu_temp">
-      <label for="nu_temp">Temporary User</label>
+    <div class="toggle-row">
+      <span>Temporary User</span>
+      <label class="toggle"><input type="checkbox" id="nu_temp"><span class="toggle-slider"></span></label>
     </div>
     <div class="modal-footer">
       <button class="btn-sm" onclick="closeModal('addUserModal')">Cancel</button>
@@ -377,18 +377,18 @@
 <div id="servicesModal" class="modal">
   <div class="modal-box">
     <h4>Services: <span id="svc_username_lbl" style="color:var(--accent)"></span></h4>
-    <div style="display:flex;flex-direction:column;gap:12px;margin:16px 0">
-      <div class="form-check">
-        <input type="checkbox" id="svc_ssh">
-        <label for="svc_ssh">SSH / Dropbear</label>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-top:16px">
+      <div class="toggle-row">
+        <span>SSH / Dropbear</span>
+        <label class="toggle"><input type="checkbox" id="svc_ssh"><span class="toggle-slider"></span></label>
       </div>
-      <div class="form-check">
-        <input type="checkbox" id="svc_zivpn">
-        <label for="svc_zivpn">ZiVPN</label>
+      <div class="toggle-row">
+        <span>ZiVPN</span>
+        <label class="toggle"><input type="checkbox" id="svc_zivpn"><span class="toggle-slider"></span></label>
       </div>
-      <div class="form-check">
-        <input type="checkbox" id="svc_xray">
-        <label for="svc_xray">Xray</label>
+      <div class="toggle-row">
+        <span>Xray</span>
+        <label class="toggle"><input type="checkbox" id="svc_xray"><span class="toggle-slider"></span></label>
       </div>
     </div>
     <div class="modal-footer">
