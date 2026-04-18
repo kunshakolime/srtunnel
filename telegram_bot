@@ -128,25 +128,10 @@ async def api_get   (sv, path, **kw): return await _req("GET",    sv, path, **kw
 async def api_post  (sv, path, **kw): return await _req("POST",   sv, path, **kw)
 async def api_put   (sv, path, **kw): return await _req("PUT",    sv, path, **kw)
 async def api_delete(sv, path, **kw): return await _req("DELETE", sv, path, **kw)
-
-
-async def do_login(url: str, username: str, password: str) -> str:
-    """POST /api/login → bearer token, raises ApiError on failure."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as sess:
-        async with sess.post(f"{url.rstrip('/')}/api/login",
-                             json={"username": username, "password": password,
-                                   "label": "telegram-bot"}) as r:
-            body = await r.json(content_type=None)
-            if r.status >= 400:
-                raise ApiError(r.status, body.get("detail", "Login failed"))
-            return body["token"]
-
-
 async def fetch_serverlist(primary_token: str) -> list[dict]:
     sv = {"url": PRIMARY_URL, "token": primary_token}
     result = await api_get(sv, "/api/serverlist")
     return result if isinstance(result, list) else []
-
 
 # ── Keyboard helpers ──────────────────────────────────────────────────────────
 
@@ -243,13 +228,12 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE,
     sess = get_session(uid)
 
     if not sess:
-        text   = "👋 *Welcome!*\n\nUse /login to authenticate."
-        markup = kb([("🔐 Login", "login_start")])
+        # Updated welcome message to remove the login button [cite: 280]
+        text = "👋 *Welcome!*\n\nPlease use `/login <token>` to authenticate."
         if update.callback_query:
-            await update.callback_query.edit_message_text(text, parse_mode="Markdown",
-                                                          reply_markup=markup)
+            await update.callback_query.edit_message_text(text, parse_mode="Markdown")
         else:
-            await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
+            await update.message.reply_text(text, parse_mode="Markdown")
         return
 
     server = active_server(uid)
@@ -357,13 +341,33 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_menu(update, context, notice="❌ Cancelled")
 
 async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    context.user_data["action"] = "login_username"
-    await update.message.reply_text(
-        f"*🔐 Login*\n\nPrimary API: `{PRIMARY_URL}`\n\n"
-        "Send your Linux username:\n\n/cancel to abort",
-        parse_mode="Markdown")
-
+    uid = update.effective_user.id
+    # Check if a token was provided: /login <token>
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Usage: `/login <your_bearer_token>`\n\nExample:\n`/login eyJhbG...`",
+            parse_mode="Markdown"
+        )
+        return
+    primary_token = context.args[0]
+    
+    try:
+        # Fetch servers using the provided token to verify it [cite: 269]
+        servers = await fetch_serverlist(primary_token)
+        
+        # Initialize the session [cite: 262]
+        set_session(uid, {
+            "primary_token": primary_token,
+            "servers":       servers,
+            "active_id":     servers[0]["id"] if servers else None
+        })
+        
+        await show_menu(update, context, notice="✅ Login successful via token!")
+        
+    except ApiError as e:
+        await update.message.reply_text(f"❌ Login failed: `{e.detail}`", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: `{e}`")
 async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     clear_session(uid)
@@ -398,14 +402,6 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data
 
     # ── Pre-session callbacks ──────────────────────────────────────────────────
-    if data == "login_start":
-        context.user_data.clear()
-        context.user_data["action"] = "login_username"
-        await q.edit_message_text(
-            f"*🔐 Login*\n\nPrimary API: `{PRIMARY_URL}`\n\n"
-            "Send your Linux username:\n\n/cancel to abort",
-            parse_mode="Markdown")
-        return
 
     if data == "back_to_menu":
         await show_menu(update, context); return
@@ -1086,41 +1082,16 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get("action")
     text   = (update.message.text or "").strip()
 
-    # ── Login flow — no session required ──────────────────────────────────────
-    if action == "login_username":
-        context.user_data.update(login_username=text, action="login_password")
-        await update.message.reply_text("🔒 Send your password:\n\n/cancel to abort")
-        return
-
-    if action == "login_password":
-        username = context.user_data.pop("login_username", "")
-        context.user_data.pop("action", None)
-        msg = await update.message.reply_text("⏳ Logging in…")
-        try:
-            token   = await do_login(PRIMARY_URL, username, text)
-            servers = await fetch_serverlist(token)
-
-            # Make sure there's always a primary entry
-            has_primary = any(s.get("url","").rstrip("/") == PRIMARY_URL for s in servers)
-            if not has_primary:
-                servers.insert(0, {"id": "__primary__", "name": "Primary",
-                                   "url": PRIMARY_URL, "token": token})
-
-            sess = {"primary_token": token, "servers": servers,
-                    "active_id": servers[0]["id"] if servers else None}
-            set_session(uid, sess)
-            await msg.edit_text(
-                f"✅ Logged in as *{username}*\n{len(servers)} server(s) available.",
-                parse_mode="Markdown")
-            await show_menu(update, context)
-        except ApiError as e:
-            await msg.edit_text(f"❌ Login failed: `{e.detail}`", parse_mode="Markdown")
-        return
-
     # Session required for everything else
     sess = get_session(uid)
     if not sess:
-        await update.message.reply_text("Please /login first."); return
+        text = "👋 *Welcome!*\n\nUse `/login <token>` to authenticate."
+        # Remove the "🔐 Login" button since it triggers the old multi-step flow 
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        return
 
     server = active_server(uid)
     if not server:
