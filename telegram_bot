@@ -500,15 +500,41 @@ async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  #
 
         async def run_st():
             try:
-                r    = await api_get(server, "/api/speedtest")
-                dl   = r.get("download", {}).get("bandwidth", 0)
-                ul   = r.get("upload",   {}).get("bandwidth", 0)
-                ping = (r.get("ping") or {}).get("latency")
-                def mbps(b): return f"{b*8/1_000_000:.1f} Mbps" if b else "?"
-                msg  = (f"*🚀 Speed Test*\n\n"
-                        f"⬇️ Download: `{mbps(dl)}`\n"
-                        f"⬆️ Upload: `{mbps(ul)}`")
-                if ping: msg += f"\n📶 Ping: `{ping:.1f} ms`"
+                r = await api_get(server, "/api/speedtest")
+                dl = r.get("dl_mbps")
+                ul = r.get("ul_mbps")
+                if not dl or not ul:
+                    msg = f"❌ Speed test failed — no result"
+                    if r.get("detail"):
+                        msg += f"\n`{r.detail}`"
+                else:
+                    def mbps(v):
+                        return f"{v:.1f}" if v else "—"
+                    def ms(v):
+                        return f"{v:.2f}" if v else "—"
+
+                    dl_lat = r.get("dl_lat_iqm")
+                    dl_jit = r.get("dl_lat_jitter")
+                    ul_lat = r.get("ul_lat_iqm")
+                    ul_jit = r.get("ul_lat_jitter")
+                    ping = r.get("ping_ms")
+                    ping_jit = r.get("ping_jitter")
+                    loss = r.get("packet_loss", 0)
+                    srv_loc = r.get("server_location") or "—"
+                    srv_name = r.get("server_name") or "—"
+                    ip = r.get("external_ip") or ""
+                    url = r.get("result_url") or ""
+
+                    msg = (f"*🚀 Speed Test*\n\n"
+                          f"⬇️ Download: *{mbps(dl)} Mbps*\n   lat {ms(dl_lat)} ms · jitter {ms(dl_jit)} ms\n"
+                          f"⬆️ Upload: *{mbps(ul)} Mbps*\n   lat {ms(ul_lat)} ms · jitter {ms(ul_jit)} ms\n"
+                          f"📶 Ping: *{ms(ping)} ms*\n   jitter {ms(ping_jit)} ms · loss {loss}%\n\n"
+                          f"📍 {srv_loc}\n"
+                          f"Server — {srv_name}")
+                    if ip:
+                        msg += f"\n`{ip}`"
+                    if url:
+                        msg += f"\n[↗ View result]({url})"
             except ApiError as e: msg = f"❌ `{e.detail}`"
             except Exception  as e: msg = f"❌ `{e}`"
             try:

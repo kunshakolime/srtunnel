@@ -42,7 +42,7 @@ fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.
 # ── Python Venv ───────────────────────────────────────────────────────────────
 echo "Setting up Python venv..."
 [ -d venv ] || python3 -m venv venv
-$BOT_DIR/venv/bin/pip install --upgrade pip && $BOT_DIR/venv/bin/pip install python-telegram-bot ruamel.yaml psutil PyYAML certbot
+$BOT_DIR/venv/bin/pip install --upgrade pip && $BOT_DIR/venv/bin/pip install python-telegram-bot ruamel.yaml psutil PyYAML certbot aiohttp
 #for api
 $BOT_DIR/venv/bin/pip install fastapi uvicorn python-pam python-jose[cryptography] python-multipart
 
