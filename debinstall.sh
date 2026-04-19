@@ -94,7 +94,7 @@ CF_ZONE="${CF_ZONE:-}"
 # These usually require user-specific values, so they remain empty if not set
 TOKEN="${TOKEN:-}"
 DOMAIN="${DOMAIN:-}"
-SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sldns$DOMAIN}"
+SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd$DOMAIN}"
 
 
 
