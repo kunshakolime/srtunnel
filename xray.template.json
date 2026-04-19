@@ -1,7 +1,7 @@
 {
   "log": {
-    "access": "/root/srtunnel/temp/access.log",
-    "error": "/root/srtunnel/temp/error.log",
+    "access": "/root/srtunnel/tmp/access.log",
+    "error": "/root/srtunnel/tmp/error.log",
     "loglevel": "warning"
   },
   "api": {
