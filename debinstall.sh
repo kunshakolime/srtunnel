@@ -141,9 +141,7 @@ EOF
 
 # Add stream block to nginx.conf
 sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
-nginx -t
-systemctl enable nginx
-systemctl restart nginx
+
 
 # ── TLS Certificate ───────────────────────────────────────────────────────────
 ./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
@@ -189,9 +187,11 @@ WantedBy=multi-user.target
 EOF
 
 ln -sf /root/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
-systemctl daemon-reload
-systemctl enable --now srapi
-
 
 # ── Done ──────────────────────────────────────────────────────────────────────
+systemctl daemon-reload
+systemctl enable --now srapi
+nginx -t
+systemctl enable nginx
+systemctl restart nginx
 echo "tunnel up and running"
