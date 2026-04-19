@@ -16,6 +16,7 @@ echo ""
 echo "This will remove srtunnel and all associated services, configs, and files."
 confirm "Are you sure you want to proceed?" || { echo "Aborted."; exit 0; }
 
+tmux kill-server
 # ── Stop & Disable Services ───────────────────────────────────────────────────
 echo ""
 echo "[1/8] Stopping and disabling services..."
