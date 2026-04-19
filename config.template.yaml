@@ -10,7 +10,7 @@ manager:
   - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053
   - echo "starting..."
   - sleep 3
-  keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, srapi, stunnel]
+  keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, stunnel]
   enable: [udp-rules]
   services:
     stunnel: stunnel
@@ -48,8 +48,8 @@ telegram_bot:
 websocket:
   # WebSocket Tunnel Server Configuration
   ports: # Port Configuration
-    http: [80, 8080, 8000, 8880]      # HTTP ports (plain text)
-    https: []                      # HTTPS ports (SSL/TLS)
+    http: [${HTTP}]      # HTTP ports (plain text)
+    https: [${HTTPS}]                      # HTTPS ports (SSL/TLS)
     enable_ssl: true                   # Enable HTTPS servers
   backend: # Backend Server (SSH, telnet, etc.)
     host: "127.0.0.1"
