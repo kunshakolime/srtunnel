@@ -1,5 +1,16 @@
+#!/usr/bin/env bash
+
 BOT_DIR="/root/srtunnel"
 REPO="https://raw.githubusercontent.com/kunshakolime/srtunnel/main/"
+SSH_DEF="22"
+H1_DEF="1000:2999"
+H2_DEF="3000:5999"
+ZU_DEF="6000:19999"
+UC_DEF="20000:30000"
+DEFAULT_IFACE="$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)"
+SSL_DEF="8443"
+HTTP_DEF="80, 8080, 8000, 8880"
+HTTPS_DEF="8444"
 
 fetch()      { local src="$1" dst="$2"; [[ "$src" == http* ]] || src="${REPO}$src"; curl -fsSL "$src" -o "$dst" || echo "WARNING: failed to fetch $src"; }
 speedtest() {
@@ -65,31 +76,39 @@ echo "/sbin/nologin" >> /etc/shells
 systemctl reload sshd
 
 
-SSH_DEF="22"    H1_DEF="1000:2999"  H2_DEF="3000:5999"
-ZU_DEF="6000:19999"                 UC_DEF="20000:30000"
 
 
 # ── User Input ────────────────────────────────────────────────────────────────
-DEFAULT_IFACE="$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)"
-read -rp "Interface             [$DEFAULT_IFACE]: " IFACE; IFACE="${IFACE:-$DEFAULT_IFACE}"
-read -rp "SSH backend port      [$SSH_DEF]: "       SSH;   SSH="${SSH:-$SSH_DEF}"
-read -rp "Hysteria 1 port range [$H1_DEF]: "        H1_PR; H1_PR="${H1_PR:-$H1_DEF}"
-read -rp "Hysteria 2 port range [$H2_DEF]: "        H2_PR; H2_PR="${H2_PR:-$H2_DEF}"
-read -rp "ZiVPN UDP port range  [$ZU_DEF]: "        ZU_PR; ZU_PR="${ZU_PR:-$ZU_DEF}"
-read -rp "UDP Custom port range [$UC_DEF]: "        UC_PR; UC_PR="${UC_PR:-$UC_DEF}"
-read -rp "Telegram ID: "    ID
-read -rp "Telegram token: " TOKEN
-read -rp "Domain: "         DOMAIN;        DOMAIN="${DOMAIN:-}"
-read -rp "SlowDNS domain: " SLOWDNSDOMAIN; SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-}"
 
-read -rp "Run speedtest? [Y/n]: " RUN_TEST
-if [[ "${RUN_TEST:-Y}" =~ ^[Yy]$ ]]; then
-    echo "Running speedtest..."; MY_SPEED=$(speedtest); echo "Speed: $MY_SPEED"
+IFACE="${IFACE:-$DEFAULT_IFACE}"
+SSH="${SSH:-$SSH_DEF}"
+H1_PR="${H1_PR:-$H1_DEF}"
+H2_PR="${H2_PR:-$H2_DEF}"
+ZU_PR="${ZU_PR:-$ZU_DEF}"
+UC_PR="${UC_PR:-$UC_DEF}"
+RUN_TEST="${RUN_SPEEDTEST:-Y}"
+SSL="${SSL:-$SSL_DEF}"
+HTTP="${HTTP:-$HTTP_DEF}"
+HTTPS="${HTTPS:-$HTTPS_DEF}"
+
+# These usually require user-specific values, so they remain empty if not set
+TOKEN="${TOKEN:-}"
+DOMAIN="${DOMAIN:-}"
+SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-}"
+
+
+
+
+if [[ "$RUN_TEST" =~ ^[Yy]$ ]]; then
+    echo "Running speedtest..."
+    # Ensure speedtest is installed to avoid script crashes
+    MY_SPEED=$(speedtest --simple 2>/dev/null || echo "Speedtest tool not found")
+    echo "Speed: $MY_SPEED"
 else
-    MY_SPEED="? Mbps"; echo "Skipping speedtest."
+    MY_SPEED="? Mbps"
+    echo "Skipping speedtest."
 fi
-
-export IFACE SSH ID TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED
+export IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
 # ── Setup Nginx ─────────────────────────────────────────────────────────────
@@ -154,5 +173,4 @@ systemctl enable --now srapi
 
 ln -sf /root/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
 # ── Done ──────────────────────────────────────────────────────────────────────
-nano config.yaml
-
+echo "tunnel up and running"
