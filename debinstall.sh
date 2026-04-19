@@ -128,22 +128,21 @@ cp -r ./srtdash /var/www/
 # Create stream-enabled directory
 mkdir -p /etc/nginx/stream-enabled
 
-cat > /etc/nginx/stream-enabled/srtdash << 'EOF'
+cat > /etc/nginx/stream-enabled/srtdash << EOF
 map_hash_bucket_size 128;
 
-map $ssl_preread_server_name $backend {
-    sni1.com  127.0.0.1:8445;
-    sni2.com  127.0.0.1:8443;
-    default                                             127.0.0.1:8444;
+map \$ssl_preread_server_name \$backend {
+    rt1.$DOMAIN  127.0.0.1:8445;
+    rt2.$DOMAIN  127.0.0.1:8443;
+    default      127.0.0.1:8444;
 }
 
 server {
     listen 443;
-    proxy_pass $backend;
+    proxy_pass \$backend;
     ssl_preread on;
 }
 EOF
-
 
 # Add stream block to nginx.conf
 sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
