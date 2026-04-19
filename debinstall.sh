@@ -63,10 +63,6 @@ $BOT_DIR/venv/bin/pip install fastapi uvicorn python-pam python-jose[cryptograph
 
 ln -sf "$BOT_DIR/srtunnel" /usr/sbin/srtunnel
 
-# ── Certificates ──────────────────────────────────────────────────────────────
-./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
-openssl req -x509 -newkey rsa:4096 -nodes -out server.crt -keyout server.key -days 365 -subj "/CN=localhost"
-echo "Certificates generated."
 # ── SSH tweak ─────────────────────────────────────────────────────────────
 sshd_ensure(){ grep -qF "$1" /etc/ssh/sshd_config || echo "$1" >> /etc/ssh/sshd_config; }
 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
@@ -132,8 +128,8 @@ cat > /etc/nginx/stream-enabled/srtdash << EOF
 map_hash_bucket_size 128;
 
 map \$ssl_preread_server_name \$backend {
-    rt1.$DOMAIN  127.0.0.1:8443;
     default      127.0.0.1:8444;
+    rt1.$DOMAIN  127.0.0.1:8443;
     rt2.$DOMAIN  127.0.0.1:8445;
     rt3.$DOMAIN  127.0.0.1:8446;
     ;
@@ -152,7 +148,32 @@ nginx -t
 systemctl enable nginx
 systemctl restart nginx
 
+# ── TLS Certificate ───────────────────────────────────────────────────────────
+./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
+openssl req -x509 -newkey rsa:4096 -nodes -out server.crt -keyout server.key -days 365 -subj "/CN=localhost"
+echo "Test certificates generated."
+if [[ -n "$DOMAIN" ]]; then
+    CERT_DOMAINS=("$DOMAIN" "rt1.$DOMAIN" "rt2.$DOMAIN" "rt3.$DOMAIN")
+    DOMAIN_ARGS=(); for d in "${CERT_DOMAINS[@]}"; do DOMAIN_ARGS+=(-d "$d"); done
 
+    if $BOT_DIR/venv/bin/certbot certonly \
+        --webroot -w /var/www/srtdash \
+        --non-interactive --agree-tos --register-unsafely-without-email \
+        --expand \
+        "${DOMAIN_ARGS[@]}"; then
+
+        LIVE="/etc/letsencrypt/live/$DOMAIN"
+        if [[ -f "$LIVE/fullchain.pem" && -f "$LIVE/privkey.pem" ]]; then
+            ln -sf "$LIVE/fullchain.pem" $BOT_DIR/server.crt
+            ln -sf "$LIVE/privkey.pem"  $BOT_DIR/server.key
+            echo "Real certs linked for $DOMAIN"
+        else
+            echo "WARNING: certbot succeeded but cert files not found, keeping self-signed."
+        fi
+    else
+        echo "WARNING: certbot failed, keeping self-signed certs."
+    fi
+fi
 
 cat > /etc/systemd/system/srapi.service << 'EOF'
 [Unit]
@@ -170,9 +191,10 @@ Environment=HOME=/root
 WantedBy=multi-user.target
 EOF
 
+ln -sf /root/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
 systemctl daemon-reload
 systemctl enable --now srapi
 
-ln -sf /root/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo "tunnel up and running"
