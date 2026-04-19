@@ -97,13 +97,8 @@ DOMAIN="${DOMAIN:-}"
 SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd$DOMAIN}"
 
 
-
-
 if [[ "$RUN_TEST" =~ ^[Yy]$ ]]; then
-    echo "Running speedtest..."
-    # Ensure speedtest is installed to avoid script crashes
-    MY_SPEED=$(speedtest --simple 2>/dev/null || echo "Speedtest tool not found")
-    echo "Speed: $MY_SPEED"
+    echo "Running speedtest..."; MY_SPEED=$(speedtest); echo "Speed: $MY_SPEED"
 else
     MY_SPEED="? Mbps"
     echo "Skipping speedtest."
