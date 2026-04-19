@@ -34,9 +34,9 @@ telegram_bot:
   token: "${TOKEN}"
   primary_url: "http://127.0.0.1:51700"
   domain: "${DOMAIN}"
-  cf_root_domain: "example.com"   # ← root domain for DNS management
-  cf_token: "..."
-  cf_zone:  "..."
+  cf_root_domain: "${CF_ROOT_DOMAIN}"   # ← root domain for DNS management
+  cf_token: "${CF_TOKEN}"
+  cf_zone:  "${CF_ZONE}"
   dnstt: "${SLOWDNSDOMAIN}"
   slowdnskey: "./slowdns.pub"
   interface: "${IFACE}"
