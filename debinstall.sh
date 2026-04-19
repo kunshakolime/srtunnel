@@ -111,6 +111,8 @@ fi
 export IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
+openssl req -x509 -newkey rsa:4096 -nodes -out server.crt -keyout server.key -days 365 -subj "/CN=localhost"
+echo "Test certificates generated."
 # ── Setup Nginx ─────────────────────────────────────────────────────────────
 envsubst '$DOMAIN' < srtdash.template > /etc/nginx/sites-available/srtdash
 
@@ -152,8 +154,7 @@ systemctl restart nginx
 
 # ── TLS Certificate ───────────────────────────────────────────────────────────
 ./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
-openssl req -x509 -newkey rsa:4096 -nodes -out server.crt -keyout server.key -days 365 -subj "/CN=localhost"
-echo "Test certificates generated."
+
 if [[ -n "$DOMAIN" ]]; then
     CERT_DOMAINS=("$DOMAIN" "rt1.$DOMAIN" "rt2.$DOMAIN" "rt3.$DOMAIN")
     DOMAIN_ARGS=(); for d in "${CERT_DOMAINS[@]}"; do DOMAIN_ARGS+=(-d "$d"); done
