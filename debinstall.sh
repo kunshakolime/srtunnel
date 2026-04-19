@@ -135,7 +135,6 @@ map \$ssl_preread_server_name \$backend {
     rt1.$DOMAIN  127.0.0.1:8443;
     rt2.$DOMAIN  127.0.0.1:8445;
     rt3.$DOMAIN  127.0.0.1:8446;
-    ;
 }
 
 server {
