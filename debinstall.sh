@@ -10,7 +10,7 @@ UC_DEF="20000:30000"
 DEFAULT_IFACE="$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)"
 SSL_DEF="8443"
 HTTP_DEF="80, 8080, 8000, 8880"
-HTTPS_DEF="8444"
+HTTPS_DEF="8446"
 
 fetch()      { local src="$1" dst="$2"; [[ "$src" == http* ]] || src="${REPO}$src"; curl -fsSL "$src" -o "$dst" || echo "WARNING: failed to fetch $src"; }
 speedtest() {
@@ -132,9 +132,11 @@ cat > /etc/nginx/stream-enabled/srtdash << EOF
 map_hash_bucket_size 128;
 
 map \$ssl_preread_server_name \$backend {
-    rt1.$DOMAIN  127.0.0.1:8445;
-    rt2.$DOMAIN  127.0.0.1:8443;
+    rt1.$DOMAIN  127.0.0.1:8443;
     default      127.0.0.1:8444;
+    rt2.$DOMAIN  127.0.0.1:8445;
+    rt3.$DOMAIN  127.0.0.1:8446;
+    ;
 }
 
 server {
