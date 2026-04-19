@@ -44,6 +44,7 @@ mv ./udp-custom-linux-amd64 ./udp-custom
 mv ./hysteria-linux-amd64-v1.3.5 ./hysteria1
 mv ./hysteria-linux-amd64-v2.7.0 ./hysteria2
 
+
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"   geoip.dat
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat" geosite.dat
 
