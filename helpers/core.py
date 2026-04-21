@@ -2,7 +2,7 @@ import sqlite3, datetime, random, string, os, shutil, logging, uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from helpers import system, zivpn, xray
+from helpers import ssh, zivpn, xray
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ def sync():
     Expire temp users, then reconcile each service against the DB.
 
     Per-service routing:
-      ssh   — system.create_user / delete_user / set_maxlogins
+      ssh   — ssh.create_user / delete_user / set_maxlogins
       zivpn — zivpn.set_passwords  (pushes the full active password list)
       xray  — xray.sync_users_to_inbound  (diffs against live inbound)
     """
@@ -130,10 +130,10 @@ def sync():
 
     # ── SSH cleanup ───────────────────────────────────────────────────────────
     for u in expired_temp:
-        system.delete_user(u)
+        ssh.delete_user(u)
     for u in all_expired:
-        if system.user_exists(u):
-            system.delete_user(u)
+        if ssh.user_exists(u):
+            ssh.delete_user(u)
 
     # ── SSH provisioning ──────────────────────────────────────────────────────
     ssh_active   = {u: d for u, d in active.items() if "ssh"   in d["services"]}
@@ -141,10 +141,10 @@ def sync():
     xray_active  = {u: d for u, d in active.items() if "xray"  in d["services"]}
 
     for u, d in ssh_active.items():
-        if not system.user_exists(u):
-            system.create_user(u, d["password"], d["max_logins"])
+        if not ssh.user_exists(u):
+            ssh.create_user(u, d["password"], d["max_logins"])
         elif d["max_logins"]:
-            system.set_maxlogins(u, d["max_logins"])
+            ssh.set_maxlogins(u, d["max_logins"])
 
     # ── ZiVPN ─────────────────────────────────────────────────────────────────
     zivpn_passwords = [d["password"] for d in zivpn_active.values()]
@@ -237,7 +237,7 @@ def add_user(username, password=None, days=None, temporary=False, max_logins=Non
     # doing it here gives faster feedback and avoids the full re-sync cost)
     sys_created = False
     if "ssh" in svc_set:
-        sys_created = system.create_user(username, password, max_logins)
+        sys_created = ssh.create_user(username, password, max_logins)
 
     return True, password, expires, sys_created, None
 
@@ -254,7 +254,7 @@ def delete_user(username):
         c.connection.commit()
 
     if "ssh" in svc_set:
-        system.delete_user(username)
+        ssh.delete_user(username)
 
     # xray removal — best-effort across all configured inbounds
     if "xray" in svc_set:
@@ -355,7 +355,7 @@ def change_password(username, new_password=None):
         old = row[0]
         c.execute("UPDATE users SET password=? WHERE username=?", (new_password, username))
         c.connection.commit()
-    system.update_password(username, new_password)
+    ssh.update_password(username, new_password)
     return True, old, new_password
 
 
@@ -427,7 +427,7 @@ def set_maxlogins(username, limit=None):
         ok = c.rowcount > 0
         c.connection.commit()
     if ok:
-        system.set_maxlogins(username, limit)
+        ssh.set_maxlogins(username, limit)
     return ok
 
 
