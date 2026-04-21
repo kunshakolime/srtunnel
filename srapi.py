@@ -351,8 +351,13 @@ def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
 def list_users(user: str = Depends(get_current_user)):
     users = core.get_users()
     logged_in = monitor.logged_in_users()
+    traffic = {t['username']: t for t in monitor.all_user_traffic()}
     for u in users:
         u["connections"] = logged_in.get(u["username"], 0)
+        t = traffic.get(u["username"], {})
+        u["download"] = t.get("download", 0)
+        u["upload"] = t.get("upload", 0)
+        u["total"] = t.get("total", 0)
     return users
 
 @app.post("/api/users")
@@ -574,8 +579,20 @@ def system_info(user: str = Depends(get_current_user)):
 
 @app.get("/api/ssh-users")
 def get_ssh_users(user: str = Depends(get_current_user)):
-    """Returns all logged-in SSH users with their connection counts."""
-    return monitor.logged_in_users()
+    """Returns all logged-in SSH users with their connection counts and traffic."""
+    ssh_users = monitor.logged_in_users()
+    traffic = {t['username']: t for t in monitor.all_user_traffic()}
+    result = []
+    for username, count in ssh_users.items():
+        t = traffic.get(username, {})
+        result.append({
+            'username': username,
+            'connections': count,
+            'download': t.get("download", 0),
+            'upload': t.get("upload", 0),
+            'total': t.get("total", 0),
+        })
+    return result
 
 
 @app.get("/api/speedtest")

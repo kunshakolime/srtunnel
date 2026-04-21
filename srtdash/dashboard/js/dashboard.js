@@ -68,10 +68,21 @@ async function loadUsers() {
   ]);
 
   const users = dbRes.ok ? await dbRes.json() : [];
-  const sshUsers = sshRes.ok ? await sshRes.json() : {};
+  const sshUsersArr = sshRes.ok ? await sshRes.json() : [];
+  const sshUsers = {};
+  for (const s of sshUsersArr) {
+    sshUsers[s.username] = s;
+  }
 
   const dbUsernames = new Set(users.map(u => u.username));
   const rows = [];
+
+  function _fmtBytes(b) {
+    if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(1) + "G";
+    if (b >= 1_048_576) return (b / 1_048_576).toFixed(1) + "M";
+    if (b >= 1024) return (b / 1024).toFixed(1) + "K";
+    return b;
+  }
 
   for (const u of users) {
     const conns = u.connections || 0;
@@ -90,6 +101,8 @@ async function loadUsers() {
             <span class="conn-dot"></span>${connDisplay}
           </span>
         </td>
+        <td style="font-size:12px">${_fmtBytes(u.download || 0)}</td>
+        <td style="font-size:12px">${_fmtBytes(u.upload || 0)}</td>
         <td style="font-family:var(--font-mono);font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
         <td onclick="event.stopPropagation()">
           <div style="display:flex;gap:6px">
@@ -102,11 +115,11 @@ async function loadUsers() {
     `);
   }
 
-  for (const [username, count] of Object.entries(sshUsers)) {
-    if (!dbUsernames.has(username)) {
+  for (const s of sshUsersArr) {
+    if (!dbUsernames.has(s.username)) {
       rows.push(`
         <tr style="opacity:0.5" title="Not in database">
-          <td><strong style="font-family:var(--font-mono)">${username}</strong></td>
+          <td><strong style="font-family:var(--font-mono)">${s.username}</strong></td>
           <td>—</td>
           <td><span class="badge">Unknown</span></td>
           <td>—</td>
@@ -114,9 +127,11 @@ async function loadUsers() {
           <td>—</td>
           <td>
             <span class="conn-badge">
-              <span class="conn-dot"></span>${count}
+              <span class="conn-dot"></span>${s.connections}
             </span>
           </td>
+          <td>${_fmtBytes(s.download || 0)}</td>
+          <td>${_fmtBytes(s.upload || 0)}</td>
           <td>—</td>
           <td onclick="event.stopPropagation()">—</td>
         </tr>
@@ -124,7 +139,7 @@ async function loadUsers() {
     }
   }
 
-  document.getElementById('usersBody').innerHTML = rows.join('') || '<tr><td colspan="9" class="empty-state">No users found</td></tr>';
+  document.getElementById('usersBody').innerHTML = rows.join('') || '<tr><td colspan="11" class="empty-state">No users found</td></tr>';
 }
 
 async function doSync() {
