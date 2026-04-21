@@ -120,3 +120,67 @@ def bandwidth_usage(iface, interval=1):
         'rx': _fmt_speed(rx_bps),
         'tx': _fmt_speed(tx_bps),
     }
+
+
+# ── User traffic (eBPF) ─────────────────────────────────────────────────────────
+
+import os
+import re
+import glob
+import pwd
+
+
+def _get_total(filepath, direction):
+    try:
+        total = 0
+        with open(filepath) as f:
+            for line in f:
+                parts = line.rstrip().split(',')
+                if len(parts) >= 2 and parts[0] == direction:
+                    try:
+                        total += int(parts[1])
+                    except ValueError:
+                        pass
+        return total
+    except (IOError, OSError):
+        return 0
+
+
+def _get_username(uid):
+    try:
+        return pwd.getpwuid(int(uid)).pw_name
+    except (KeyError, ValueError, OSError):
+        return f"uid:{uid}"
+
+
+def all_user_traffic():
+    """Get traffic for all users with log files. Returns list of dicts."""
+    results = []
+    for log_file in glob.glob("/tmp/traffic_user_*.log"):
+        match = re.search(r'_(\d+)\.log$', log_file)
+        if not match:
+            continue
+        uid = match.group(1)
+        username = _get_username(uid)
+        total_in = _get_total(log_file, "in")
+        total_out = _get_total(log_file, "out")
+        results.append({
+            'uid': int(uid),
+            'username': username,
+            'download': total_in,
+            'upload': total_out,
+            'total': total_in + total_out,
+        })
+    return results
+
+def user_traffic(username=None, uid=None):
+    """Get traffic for a specific user (by username or UID)."""
+    all_data = all_user_traffic()
+
+    for entry in all_data:
+        if username and entry["username"] == username:
+            return entry
+        if uid is not None and entry["uid"] == uid:
+            return entry
+
+    return None
