@@ -62,39 +62,68 @@ async function loadDashboard() {
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 async function loadUsers() {
-  const res = await apiFetch('/api/users');
-  if (!res.ok) {
-    const err = await res.text();
-    document.getElementById('usersBody').innerHTML = '<tr><td colspan="9" class="empty-state">Could not load users</td></tr>';
-    toast('Failed to load users', 'err');
-    console.error('loadUsers failed:', res.status, err);
-    return;
+  const [dbRes, sshRes] = await Promise.all([
+    apiFetch('/api/users'),
+    apiFetch('/api/ssh-users')
+  ]);
+
+  const users = dbRes.ok ? await dbRes.json() : [];
+  const sshUsers = sshRes.ok ? await sshRes.json() : {};
+
+  const dbUsernames = new Set(users.map(u => u.username));
+  const rows = [];
+
+  for (const u of users) {
+    rows.push(`
+      <tr style="cursor:pointer" onclick="openUserPanel('${u.username}')">
+        <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
+        <td><code>${u.password}</code></td>
+        <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
+        <td><span class="badge ${u.temporary ? 'badge-temp' : 'badge-perm'}">${u.temporary ? 'Temp' : 'Perm'}</span></td>
+        <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
+        <td style="font-family:var(--font-mono);font-size:12px">${u.max_logins || '∞'}</td>
+        <td style="font-size:12px">${u.services && u.services.length ? u.services.join(', ') : '—'}</td>
+        <td>
+          <span class="conn-badge">
+            <span class="conn-dot"></span>${u.connections || 0}
+          </span>
+        </td>
+        <td style="font-family:var(--font-mono);font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
+        <td onclick="event.stopPropagation()">
+          <div style="display:flex;gap:6px">
+            <button class="btn-sm btn-icon" title="Copy UUID" onclick="copyToClipboard('${u.uuid || ''}')">📋</button>
+            <button class="btn-sm btn-icon" title="Edit" onclick="openUserPanel('${u.username}')">✎</button>
+            <button class="btn-danger btn-icon" title="Delete" onclick="deleteUser('${u.username}')">✕</button>
+          </div>
+        </td>
+      </tr>
+    `);
   }
-  const users = await res.json();
-  document.getElementById('usersBody').innerHTML = users.map(u => `
-    <tr style="cursor:pointer" onclick="openUserPanel('${u.username}')">
-      <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
-      <td><code>${u.password}</code></td>
-      <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
-      <td><span class="badge ${u.temporary ? 'badge-temp' : 'badge-perm'}">${u.temporary ? 'Temp' : 'Perm'}</span></td>
-      <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
-      <td style="font-family:var(--font-mono);font-size:12px">${u.max_logins || '∞'}</td>
-      <td style="font-size:12px">${u.services && u.services.length ? u.services.join(', ') : '—'}</td>
-      <td>
-        <span class="conn-badge">
-          <span class="conn-dot"></span>${u.connections || 0}
-        </span>
-      </td>
-      <td style="font-family:var(--font-mono);font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
-      <td onclick="event.stopPropagation()">
-        <div style="display:flex;gap:6px">
-          <button class="btn-sm btn-icon" title="Copy UUID" onclick="copyToClipboard('${u.uuid || ''}')">📋</button>
-          <button class="btn-sm btn-icon" title="Edit" onclick="openUserPanel('${u.username}')">✎</button>
-          <button class="btn-danger btn-icon" title="Delete" onclick="deleteUser('${u.username}')">✕</button>
-        </div>
-      </td>
-    </tr>
-  `).join('') || '<tr><td colspan="10" class="empty-state">No users found</td></tr>';
+
+  for (const [username, count] of Object.entries(sshUsers)) {
+    if (!dbUsernames.has(username)) {
+      rows.push(`
+        <tr style="opacity:0.5" title="Not in database">
+          <td><strong style="font-family:var(--font-mono)">${username}</strong></td>
+          <td>—</td>
+          <td><span class="badge">Unknown</span></td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td>
+            <span class="conn-badge">
+              <span class="conn-dot"></span>${count}
+            </span>
+          </td>
+          <td>—</td>
+          <td onclick="event.stopPropagation()">—</td>
+        </tr>
+      `);
+    }
+  }
+
+  document.getElementById('usersBody').innerHTML = rows.join('') || '<tr><td colspan="10" class="empty-state">No users found</td></tr>';
 }
 
 async function doSync() {

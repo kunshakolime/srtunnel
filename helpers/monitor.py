@@ -15,22 +15,30 @@ _ip_cache = {"ip": None, "ts": 0}
 
 # ── Connection tracking ─────────────────────────────────────────────────────
 
-def user_connections(username):
-    """Active SSH sessions for a specific user (via `who`)."""
+def logged_in_users():
+    """Get all logged-in SSH users with their connection counts. Returns {username: count}."""
     try:
         out = subprocess.run(['who'], capture_output=True, text=True).stdout
-        return sum(1 for l in out.splitlines() if l.split() and l.split()[0] == username)
+        users = {}
+        for line in out.splitlines():
+            parts = line.split()
+            if parts:
+                user = parts[0]
+                users[user] = users.get(user, 0) + 1
+        return users
     except Exception:
-        return 0
+        return {}
+
+
+def user_connections(username):
+    """Active SSH sessions for a specific user (via `who`)."""
+    return logged_in_users().get(username, 0)
 
 
 def total_connections():
     """Total active SSH sessions, excluding root (via `who`)."""
-    try:
-        out = subprocess.run(['who'], capture_output=True, text=True).stdout
-        return sum(1 for l in out.splitlines() if l.split() and l.split()[0] != 'root')
-    except Exception:
-        return 0
+    users = logged_in_users()
+    return sum(count for user, count in users.items() if user != 'root')
 
 
 # ── System stats ──────────────────────────────────────────────────────────────

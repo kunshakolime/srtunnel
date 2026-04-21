@@ -350,8 +350,9 @@ def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
 @app.get("/api/users")
 def list_users(user: str = Depends(get_current_user)):
     users = core.get_users()
+    logged_in = monitor.logged_in_users()
     for u in users:
-        u["connections"] = monitor.user_connections(u["username"])
+        u["connections"] = logged_in.get(u["username"], 0)
     return users
 
 @app.post("/api/users")
@@ -562,6 +563,13 @@ def system_info(user: str = Depends(get_current_user)):
         "bandwidth":    bw,
         "connections":  monitor.total_connections(),
     }
+
+
+@app.get("/api/ssh-users")
+def get_ssh_users(user: str = Depends(get_current_user)):
+    """Returns all logged-in SSH users with their connection counts."""
+    return monitor.logged_in_users()
+
 
 @app.get("/api/speedtest")
 def speedtest(user: str = Depends(get_current_user)):
