@@ -12,7 +12,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from helpers.auth import verify_linux_login, create_token, get_current_user, store_token, revoke_token, list_tokens
-from helpers import core, system, dns, xray, files
+from helpers import core, dns, xray, files
+from helpers import ssh
+from helpers import monitor
 from helpers import speedtest as st
 from helpers import services as svc_helper
 import yaml, secrets, logging, traceback, time
@@ -349,7 +351,7 @@ def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
 def list_users(user: str = Depends(get_current_user)):
     users = core.get_users()
     for u in users:
-        u["connections"] = system.user_connections(u["username"])
+        u["connections"] = monitor.user_connections(u["username"])
     return users
 
 @app.post("/api/users")
@@ -406,7 +408,7 @@ def get_user(username: str, user: str = Depends(get_current_user)):
     u = core.get_user(username)
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
-    u["connections"] = system.user_connections(username)
+    u["connections"] = monitor.user_connections(username)
     return u
 
 @app.delete("/api/users/{username}")
@@ -539,17 +541,17 @@ def sync(user: str = Depends(get_current_user)):
 def system_info(user: str = Depends(get_current_user)):
     iface = cfg["IFACE"]
     try:
-        info = system.system_info() or {}
+        info = monitor.system_info() or {}
     except Exception as e:
-        logger.error("system.system_info() failed: %s\n%s", e, traceback.format_exc())
+        logger.error("monitor.system_info() failed: %s\n%s", e, traceback.format_exc())
         info = {}
     try:
-        bw = system.bandwidth_usage(iface) or {}
+        bw = monitor.bandwidth_usage(iface) or {}
     except Exception as e:
-        logger.error("system.bandwidth_usage(%r) failed: %s\n%s", iface, e, traceback.format_exc())
+        logger.error("monitor.bandwidth_usage(%r) failed: %s\n%s", iface, e, traceback.format_exc())
         bw = {}
     return {
-        "ip":           system.public_ip(),
+        "ip":           monitor.public_ip(),
         "cpu":          info.get("cpu"),
         "ram_used":     info.get("ram_used"),
         "ram_total":    info.get("ram_total"),
@@ -558,7 +560,7 @@ def system_info(user: str = Depends(get_current_user)):
         "disk_total":   info.get("disk_total"),
         "disk_percent": info.get("disk_percent"),
         "bandwidth":    bw,
-        "connections":  system.total_connections(),
+        "connections":  monitor.total_connections(),
     }
 
 @app.get("/api/speedtest")

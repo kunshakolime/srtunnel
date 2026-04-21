@@ -63,7 +63,29 @@ PRIMARY_URL = cfg["PRIMARY_URL"].rstrip("/")
 #   "servers":       list,    # [{id, name, url, token}, …] from /api/serverlist
 #   "active_id":     str,     # currently selected server id
 # }
-_sessions: dict[int, dict] = {}
+# Sessions are persisted to disk so they survive bot restarts.
+
+_SESSION_FILE = Path("sessions.json")
+
+
+def _load_sessions() -> dict[int, dict]:
+    try:
+        if _SESSION_FILE.exists():
+            raw = _json.loads(_SESSION_FILE.read_text())
+            return {int(k): v for k, v in raw.items()}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_sessions(sessions: dict[int, dict]):
+    try:
+        _SESSION_FILE.write_text(_json.dumps({str(k): v for k, v in sessions.items()}, indent=2))
+    except Exception as e:
+        logger.warning("Could not save sessions: %s", e)
+
+
+_sessions: dict[int, dict] = _load_sessions()
 
 
 def get_session(uid: int) -> Optional[dict]:
@@ -72,10 +94,12 @@ def get_session(uid: int) -> Optional[dict]:
 
 def set_session(uid: int, data: dict):
     _sessions[uid] = data
+    _save_sessions(_sessions)
 
 
 def clear_session(uid: int):
     _sessions.pop(uid, None)
+    _save_sessions(_sessions)
 
 
 def active_server(uid: int) -> Optional[dict]:
