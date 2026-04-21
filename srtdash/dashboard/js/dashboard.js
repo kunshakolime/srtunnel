@@ -74,6 +74,9 @@ async function loadUsers() {
   const rows = [];
 
   for (const u of users) {
+    const conns = u.connections || 0;
+    const max = u.max_logins;
+    const connDisplay = max ? `${conns}/${max}` : conns;
     rows.push(`
       <tr style="cursor:pointer" onclick="openUserPanel('${u.username}')">
         <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
@@ -81,11 +84,10 @@ async function loadUsers() {
         <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
         <td><span class="badge ${u.temporary ? 'badge-temp' : 'badge-perm'}">${u.temporary ? 'Temp' : 'Perm'}</span></td>
         <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
-        <td style="font-family:var(--font-mono);font-size:12px">${u.max_logins || '∞'}</td>
         <td style="font-size:12px">${u.services && u.services.length ? u.services.join(', ') : '—'}</td>
         <td>
           <span class="conn-badge">
-            <span class="conn-dot"></span>${u.connections || 0}
+            <span class="conn-dot"></span>${connDisplay}
           </span>
         </td>
         <td style="font-family:var(--font-mono);font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
@@ -110,7 +112,6 @@ async function loadUsers() {
           <td>—</td>
           <td>—</td>
           <td>—</td>
-          <td>—</td>
           <td>
             <span class="conn-badge">
               <span class="conn-dot"></span>${count}
@@ -123,7 +124,7 @@ async function loadUsers() {
     }
   }
 
-  document.getElementById('usersBody').innerHTML = rows.join('') || '<tr><td colspan="10" class="empty-state">No users found</td></tr>';
+  document.getElementById('usersBody').innerHTML = rows.join('') || '<tr><td colspan="9" class="empty-state">No users found</td></tr>';
 }
 
 async function doSync() {

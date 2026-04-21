@@ -208,10 +208,16 @@ def add_user(username, password=None, days=None, temporary=False, max_logins=Non
     services: list/set of service names, e.g. ["ssh", "xray"]
               Defaults to all services (ssh, zivpn, xray) if omitted.
     """
+    if username.lower() == 'root':
+        return False, None, None, False, "root_forbidden"
+
     svc_str = _pack_services(services)
     svc_set = _unpack_services(svc_str)
-    user_uuid = str(uuid.uuid4())
 
+    if "ssh" in svc_set and ssh.user_exists(username):
+        return False, None, None, False, "ssh_user_exists"
+
+    user_uuid = str(uuid.uuid4())
     created = datetime.datetime.now()
     expires = (created + datetime.timedelta(days=days)).isoformat() if days else None
 
@@ -233,11 +239,13 @@ def add_user(username, password=None, days=None, temporary=False, max_logins=Non
         except sqlite3.IntegrityError:
             return False, None, None, False, "username_exists"
 
-    # Immediate per-service provisioning (sync() will also catch this, but
-    # doing it here gives faster feedback and avoids the full re-sync cost)
     sys_created = False
     if "ssh" in svc_set:
         sys_created = ssh.create_user(username, password, max_logins)
+        if not sys_created:
+            with db_conn():
+                c.execute("DELETE FROM users WHERE username=?", (username,))
+            return False, None, None, False, "ssh_create_failed"
 
     return True, password, expires, sys_created, None
 

@@ -383,7 +383,14 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
         data.username, data.password, days, data.temporary, max_logins, data.services
     )
     if not ok:
-        detail = "Password already in use" if err == "password_exists" else "Username already exists"
+        error_map = {
+            "password_exists": "Password already in use",
+            "username_exists": "Username already exists in database",
+            "ssh_user_exists": "SSH user already exists on system",
+            "root_forbidden": "Cannot create root user",
+            "ssh_create_failed": "Failed to create SSH user",
+        }
+        detail = error_map.get(err, "Failed to create user")
         logger.warning("create_user failed for %r: %s (err=%s)", data.username, detail, err)
         raise HTTPException(status_code=400, detail=detail)
 
