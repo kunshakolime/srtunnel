@@ -10,7 +10,7 @@ manager:
   - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053
   - echo "starting..."
   - sleep 3
-  keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, xray, stunnel]
+  keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, xray, stunnel, tracker]
   enable: [udp-rules]
   services:
     stunnel: stunnel
@@ -27,6 +27,7 @@ manager:
     slowdns: ./dnstt-server -udp :8053 -privkey-file slowdns.key ${SLOWDNSDOMAIN} 127.0.0.1:${SSH}
     udp-rules: iptables -t nat -D PREROUTING -i ${IFACE} -p udp --dport 1:65535 -j DNAT --to-destination :36712
     xray: ./xray run -config /root/srtunnel/xray.json
+    tracker: ./traffic_meter_user
 telegram_bot:
   db_file: "users.db"
   config_file: "./zivpn.json"
