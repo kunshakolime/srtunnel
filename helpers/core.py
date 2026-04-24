@@ -155,26 +155,14 @@ def sync():
     )
 
     # ── Xray ─────────────────────────────────────────────────────────────────
-    xray_ok = True
-    xray_tag = _c("XRAY_INBOUND_TAG")
-    logger.info("sync: XRAY_INBOUND_TAG='%s', xray_users=%d", xray_tag, len(xray_active))
+    # Sync disabled - XUI panel manages xray separately
     
-    if xray_tag:
-        # xray.sync_users_to_inbound uses username as email and uuid from database
-        xray_users = [
-            {"username": u, "password": d["password"], "uid": d["uuid"]}
-            for u, d in xray_active.items()
-        ]
-        xray_ok = xray.sync_users_to_inbound(xray_tag, xray_users)
-    else:
-        logger.warning("sync: XRAY_INBOUND_TAG not configured, skipping xray sync")
-
     return {
-        "success":       zivpn_ok and xray_ok,
+        "success":       zivpn_ok,
         "deleted_count": deleted,
         "ssh_count":     len(ssh_active),
-        "zivpn_count":   len(zivpn_active),
-        "xray_count":    len(xray_active),
+        "zivpn_count":  len(zivpn_active),
+        "xray_count":   len(xray_active),
     }
 
 
@@ -263,12 +251,6 @@ def delete_user(username):
 
     if "ssh" in svc_set:
         ssh.delete_user(username)
-
-    # xray removal — best-effort across all configured inbounds
-    if "xray" in svc_set:
-        xray_tag = _c("XRAY_INBOUND_TAG")
-        if xray_tag:
-            xray.remove_user(xray_tag, username)
 
     return True
 

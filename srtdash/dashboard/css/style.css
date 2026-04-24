@@ -251,6 +251,7 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 @keyframes spin{to{transform:rotate(360deg)}}
 .mono-cell{font-family:var(--font-mono);font-size:11px;color:var(--text2)}
 .mono-cell.dimmed{color:var(--text3)}
+.row-dimmed{opacity:0.5}
 .home-server-card{margin-bottom:14px}
 .token-input-full{flex:1;min-width:0;font-family:var(--font-mono);font-size:12px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text2);width:100%}
 .btn-danger-sm{background:rgba(240,64,96,.12);color:var(--red);border:1px solid rgba(240,64,96,.2);padding:5px 10px;font-size:12px}
