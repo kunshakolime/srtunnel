@@ -798,7 +798,77 @@ def set_service_status(name: str, data: ServiceStatusRequest, user: str = Depend
     return {"service": name, "status": detail}
 
 
-# ── Backup ────────────────────────────────────────────────────────────────────
+# ── File Manager ───────────────────────────────────────────────────────────
+
+class FileOpRequest(BaseModel):
+    path: str
+    content: Optional[str] = None
+
+@app.get("/api/files/list/{directory:path}")
+def list_files(directory: str, user: str = Depends(get_current_user)):
+    """List files in a directory."""
+    full_path = "/root/srtunnel/" + directory.lstrip("/")
+    result = files.list_directory(full_path)
+    return result
+
+@app.post("/api/files/create/{filepath:path}")
+def create_file(filepath: str, data: FileOpRequest, user: str = Depends(get_current_user)):
+    """Create a new file."""
+    full_path = "/root/srtunnel/" + filepath.lstrip("/")
+    ok = files.create_file(full_path, data.content or "")
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to create file")
+    return {"status": "created", "path": filepath}
+
+@app.post("/api/files/create-dir/{directory:path}")
+def create_dir(directory: str, user: str = Depends(get_current_user)):
+    """Create a new directory."""
+    full_path = "/root/srtunnel/" + directory.lstrip("/")
+    ok = files.create_directory(full_path)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to create directory")
+    return {"status": "created", "path": directory}
+
+@app.get("/api/files/read/{filepath:path}")
+def read_file(filepath: str, user: str = Depends(get_current_user)):
+    """Read file content."""
+    full_path = "/root/srtunnel/" + filepath.lstrip("/")
+    try:
+        content = files.read_file(full_path)
+        return {"path": filepath, "content": content}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+@app.post("/api/files/write/{filepath:path}")
+def write_file_endpoint(filepath: str, data: FileOpRequest, user: str = Depends(get_current_user)):
+    """Write file content."""
+    full_path = "/root/srtunnel/" + filepath.lstrip("/")
+    try:
+        files.write_file(full_path, data.content or "")
+        return {"status": "written", "path": filepath}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/api/files/{filepath:path}")
+def delete_file(filepath: str, user: str = Depends(get_current_user)):
+    """Delete file or directory."""
+    full_path = "/root/srtunnel/" + filepath.lstrip("/")
+    is_dir = filepath.endswith("/")
+    ok = files.delete_path(full_path, is_dir)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to delete")
+    return {"status": "deleted", "path": filepath}
+
+@app.get("/api/files/download-info/{filepath:path}")
+def download_info(filepath: str, user: str = Depends(get_current_user)):
+    """Get download commands for a file."""
+    full_path = "/root/srtunnel/" + filepath.lstrip("/")
+    info = files.get_download_url(full_path)
+    if not info.get("exists"):
+        raise HTTPException(status_code=404, detail="File not found")
+    info["wget"] = files.get_wget_command(full_path)
+    info["curl"] = files.get_curl_command(full_path)
+    return info
 
 @app.get("/api/backup")
 def backup_db(user: str = Depends(get_current_user)):

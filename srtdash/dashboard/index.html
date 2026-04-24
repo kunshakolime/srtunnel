@@ -57,6 +57,7 @@
       <button onclick="showPage('backup',this)">Backup</button>
       <button onclick="showPage('scope',this)">Scope</button>
       <button onclick="showPage('servers',this)">Servers &amp; Tokens</button>
+      <button onclick="showPage('files',this)">Files</button>
     </div>
     <div class="top-right">
       <span id="refreshStamp" class="refresh-stamp" onclick="manualRefresh()" title="Click to refresh now"></span>
@@ -242,6 +243,31 @@
         <h4 style="font-size:15px;font-weight:600;color:var(--text1)">API Tokens</h4>
       </div>
       <div id="tokensList"></div>
+    </div>
+
+    <!-- FILES -->
+    <div id="page-files" class="page">
+      <div class="section-header">
+        <h3>File Manager</h3>
+        <div class="hdr-actions">
+          <button class="btn-sm" onclick="loadFiles()">↺ Refresh</button>
+          <button class="btn-sm" onclick="openNewFileModal()">+ New File</button>
+          <button class="btn-sm" onclick="openNewDirModal()">+ New Folder</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="form-row">
+          <label>Current Path</label>
+          <div style="display:flex;gap:8px">
+            <input id="filesPath" value="." placeholder="." style="flex:1">
+            <button class="btn" onclick="goToPath()">Go</button>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <button class="btn-sm" onclick="goUpDir()">⬆ Up</button>
+        </div>
+      </div>
+      <div id="filesContent"></div>
     </div>
 
   </div><!-- /content -->
@@ -430,6 +456,7 @@
 <script src="js/dashboard.js"></script>
 <script src="js/xray.js"></script>
 <script src="js/pages.js"></script>
+<script src="js/files.js"></script>
 
 </body>
 </html>

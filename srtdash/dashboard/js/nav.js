@@ -63,6 +63,7 @@ const _loaders = {
   scope:   () => loadScope(),
   servers: () => { loadServersPage(); loadTokens(); },
   tokens:  () => {},
+  files:   () => loadFiles(),
 };
 
 function manualRefresh() {
