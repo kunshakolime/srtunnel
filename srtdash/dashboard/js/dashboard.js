@@ -157,13 +157,21 @@ async function doAddUser() {
   if (document.getElementById('nu_svc_ssh').checked) services.push('ssh');
   if (document.getElementById('nu_svc_zivpn').checked) services.push('zivpn');
   if (document.getElementById('nu_svc_xray').checked) services.push('xray');
+
+  const xray_inbounds = [];
+  if (document.getElementById('nu_svc_xray').checked) {
+    const checkboxes = document.querySelectorAll('#xrayInboundsList input:checked');
+    checkboxes.forEach(cb => xray_inbounds.push(cb.value));
+  }
+
   const body = {
     username: document.getElementById('nu_username').value.trim(),
     password: document.getElementById('nu_password').value || null,
     days: isNaN(days) ? null : days,
     max_logins: isNaN(maxl) ? null : maxl,
     temporary: document.getElementById('nu_temp').checked,
-    services: services.length > 0 ? services : null
+    services: services.length > 0 ? services : null,
+    xray_inbounds: xray_inbounds.length > 0 ? xray_inbounds : null
   };
   if (!body.username) { toast('Username required', 'err'); return; }
   const res = await apiFetch('/api/users', { method: 'POST', body: JSON.stringify(body) });
@@ -179,7 +187,30 @@ async function doAddUser() {
   document.getElementById('nu_svc_zivpn').checked = true;
   document.getElementById('nu_svc_xray').checked = true;
   document.getElementById('nu_temp').checked = false;
+  toggleXrayInbounds();
   loadUsers();
+}
+
+async function toggleXrayInbounds() {
+  const show = document.getElementById('nu_svc_xray').checked;
+  document.getElementById('xrayInboundsSelect').style.display = show ? 'block' : 'none';
+  if (!show) return;
+
+  const res = await apiFetch('/api/xray/inbounds');
+  const inbounds = res.ok ? await res.json() : [];
+
+  const container = document.getElementById('xrayInboundsList');
+  if (!inbounds || inbounds.length === 0) {
+    container.innerHTML = '<span style="font-size:12px;color:var(--text3)">No inbounds available</span>';
+    return;
+  }
+
+  container.innerHTML = inbounds.map(ib => `
+    <label class="toggle-row" style="border:none;padding:4px 0">
+      <span style="font-size:13px">${ib.tag} (${ib.protocol || '?'})</span>
+      <label class="toggle"><input type="checkbox" value="${ib.tag}" checked><span class="toggle-slider"></span></label>
+    </label>
+  `).join('');
 }
 
 async function deleteUser(username) {

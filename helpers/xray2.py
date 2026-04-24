@@ -259,23 +259,26 @@ class XUIClient:
         
         logger.info(f"Adding user '{email}' to inbound {inbound_id}")
         
-        resp = self.session.post(
-            self._url(f"panel/api/inbounds/{inbound_id}/addClient"),
-            data={
-                "id": inbound_id,
-                "settings": json.dumps({
-                    "clients": [user_config]
-                })
-            }
-        )
+        try:
+            resp = self.session.post(
+                self._url("panel/api/inbounds/addClient"),
+                data={
+                    "id": inbound_id,
+                    "settings": json.dumps({
+                        "clients": [user_config]
+                    })
+                }
+            )
 
-        self._log_response(resp, "Add User")
-        resp.raise_for_status()
+            self._log_response(resp, "Add User")
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Failed to add user to inbound {inbound_id}: {e}")
+            return {"success": False, "msg": f"HTTP {resp.status_code}: {e}"}
         
         try:
             data = resp.json()
         except:
-            # Some responses may not be JSON
             data = {"success": resp.status_code == 200, "status_code": resp.status_code}
         
         if data.get("success"):
@@ -296,13 +299,18 @@ class XUIClient:
         """
         logger.info(f"Removing client '{client_uuid}' from inbound {inbound_id}")
         
-        resp = self.session.post(
-            self._url(f"panel/api/inbounds/{inbound_id}/delClient/{client_uuid}"),
-            headers={"Accept": "application/json"}
-        )
+        try:
+            resp = self.session.post(
+                self._url(f"panel/api/inbounds/delClient/{client_uuid}"),
+                data={"id": inbound_id},
+                headers={"Accept": "application/json"}
+            )
 
-        self._log_response(resp, "Remove User")
-        resp.raise_for_status()
+            self._log_response(resp, "Remove User")
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Failed to remove user {client_uuid}: {e}")
+            return {"success": False, "msg": f"HTTP {resp.status_code}: {e}"}
         
         try:
             data = resp.json()

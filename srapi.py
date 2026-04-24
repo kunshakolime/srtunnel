@@ -191,6 +191,7 @@ class CreateUserRequest(BaseModel):
     temporary:  Optional[bool] = False
     max_logins: Optional[int] = None
     services:   Optional[list[str]] = None
+    xray_inbounds: Optional[list[str]] = None
 
 class PasswordRequest(BaseModel):
     password: Optional[str] = None
@@ -405,6 +406,17 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
     # Provision services
     core.sync()
 
+    # Add Xray users to selected inbounds
+    xray_results = []
+    if data.xray_inbounds and 'xray' in (user_obj.get("services") or []):
+        for tag in data.xray_inbounds:
+            ok, uid, err = xray.add_user(tag, data.username)
+            xray_results.append({"tag": tag, "ok": ok, "id": uid, "error": err})
+            if ok:
+                logger.info("Xray user added: %s to %s by %s", data.username, tag, user)
+            else:
+                logger.warning("Xray user add failed: %s to %s — %s", data.username, tag, err)
+
     return {
         "username":   data.username,
         "password":   password,
@@ -413,6 +425,7 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
         "max_logins": max_logins,
         "services":   user_obj.get("services", []) if user_obj else [],
         "linux_ok":   linux_ok,
+        "xray":      xray_results,
     }
 
 @app.get("/api/users/{username}")
