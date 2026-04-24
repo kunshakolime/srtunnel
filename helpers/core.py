@@ -2,7 +2,7 @@ import sqlite3, datetime, random, string, os, shutil, logging, uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from helpers import ssh, zivpn, xray
+from helpers import ssh, zivpn, xray2
 
 logger = logging.getLogger(__name__)
 

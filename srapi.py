@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
 from helpers.auth import verify_linux_login, create_token, get_current_user, store_token, revoke_token, list_tokens
-from helpers import core, dns, xray, files
+from helpers import core, dns, xray2 as xray, files
 from helpers import ssh
 from helpers import monitor
 from helpers import speedtest as st
@@ -294,7 +294,7 @@ def get_serverlist_status(user: str = Depends(get_current_user)):
     return svc_helper._load_serverlist() or []
 
 
-# ── Xray ──────────────────────────────────────────────────────────────────────
+# ── Xray (xray2 / XUI Panel) ───────────────────────────────────────────────────────
 
 @app.get("/api/xray/inbounds")
 def list_xray_inbounds(user: str = Depends(get_current_user)):
@@ -341,7 +341,6 @@ def remove_xray_inbound_user(tag: str, username: str, user: str = Depends(get_cu
 
 @app.get("/api/xray/users/{username}/stats")
 def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
-    # Stats functionality removed to simplify Xray management
     raise HTTPException(status_code=410, detail="Xray stats functionality has been removed")
 
 
