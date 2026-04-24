@@ -108,5 +108,8 @@ stunnel:
       listen: 0.0.0.0:8443
       default_backend:
         - 127.0.0.1:7000
-
+xui_panel:
+  url: "https://example.com:2053/dfdffddsfssfd/"
+  username: "root"
+  password: "pass"
 
