@@ -69,12 +69,8 @@ def run_launch_commands():
 async def lifespan(app: FastAPI):
     logger.info("srapi starting up")
     run_launch_commands()
-    logger.info("syncing users to services")
-    try:
-        core.sync()
-        logger.info("initial sync completed")
-    except Exception as e:
-        logger.error("initial sync failed: %s", e)
+    logger.info("skipping old sync (XUI panel enabled)")
+    # sync disabled - old xray code is incompatible with XUI panel
     yield
     logger.info("srapi shutting down")
 
@@ -333,12 +329,14 @@ def add_xray_inbound_user(tag: str, data: XrayUserRequest, user: str = Depends(g
         raise HTTPException(status_code=400, detail=err or "Failed to add Xray user")
     return {"tag": tag, "username": data.username, "id": identifier}
 
-@app.delete("/api/xray/inbounds/{tag}/users/{username}")
-def remove_xray_inbound_user(tag: str, username: str, user: str = Depends(get_current_user)):
-    ok, err = xray.remove_user(tag, username)
+@app.delete("/api/xray/inbounds/{tag}/users/{client_uuid}")
+def remove_xray_inbound_user(tag: str, client_uuid: str, user: str = Depends(get_current_user)):
+    # client_uuid here is the email (username@tag format)
+    logger.info("remove_xray_inbound_user: tag=%s, email=%s", tag, client_uuid)
+    ok, err = xray.remove_user(tag, client_uuid)
     if not ok:
         raise HTTPException(status_code=400, detail=err or "Failed to remove Xray user")
-    return {"tag": tag, "username": username}
+    return {"tag": tag, "client_uuid": client_uuid}
 
 @app.get("/api/xray/users/{username}/stats")
 def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
@@ -349,6 +347,7 @@ def get_xray_user_stats(username: str, user: str = Depends(get_current_user)):
 
 @app.get("/api/users")
 def list_users(user: str = Depends(get_current_user)):
+    logger.info("list_users called by %s", user)
     users = core.get_users()
     logged_in = monitor.logged_in_users()
     traffic = {t['username']: t for t in monitor.all_user_traffic()}
@@ -403,19 +402,37 @@ def create_user(data: CreateUserRequest, user: str = Depends(get_current_user)):
     logger.info("User created: %s by %s (days=%s, max_logins=%s, linux_ok=%s, services=%s)",
                 data.username, user, days, max_logins, linux_ok, user_obj.get("services") if user_obj else [])
 
-    # Provision services
-    core.sync()
+    # Sync for SSH/ZIVPN (not Xray - handled separately)
+    if data.services:
+        has_ssh = "ssh" in data.services
+        has_zivpn = "zivpn" in data.services
+        if has_ssh or has_zivpn:
+            core.sync()
 
     # Add Xray users to selected inbounds
     xray_results = []
     if data.xray_inbounds and 'xray' in (user_obj.get("services") or []):
-        for tag in data.xray_inbounds:
-            ok, uid, err = xray.add_user(tag, data.username)
+        user_uuid = user_obj.get("uuid")  # Use DB UUID
+        logger.info("=== XRAY: using UUID=%s from DB", user_uuid)
+        
+        for i, tag in enumerate(data.xray_inbounds):
+            # Use unique email: username@tag
+            xray_email = f"{data.username}@{tag}"
+            
+            # Check if user already exists
+            existing_users = xray.list_users(tag)
+            user_exists = any(u.get('email') == xray_email for u in existing_users)
+            
+            if user_exists:
+                ok, uid, err = True, user_uuid, ""
+            else:
+                ok, uid, err = xray.add_user(tag, xray_email, uid=user_uuid)
+            
             xray_results.append({"tag": tag, "ok": ok, "id": uid, "error": err})
             if ok:
-                logger.info("Xray user added: %s to %s by %s", data.username, tag, user)
+                logger.info("Xray user added: %s (uuid=%s) to %s", xray_email, uid, tag)
             else:
-                logger.warning("Xray user add failed: %s to %s — %s", data.username, tag, err)
+                logger.warning("Xray user add failed: %s to %s — %s", xray_email, tag, err)
 
     return {
         "username":   data.username,
@@ -438,10 +455,31 @@ def get_user(username: str, user: str = Depends(get_current_user)):
 
 @app.delete("/api/users/{username}")
 def delete_user(username: str, user: str = Depends(get_current_user)):
-    if not core.delete_user(username):
+    # Get user FIRST before deleting
+    u = core.get_user(username)
+    if not u:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Remove from XUI panel inbounds BEFORE deleting from DB
+    xray_results = []
+    if u and "xray" in (u.get("services") or []):
+        user_uuid = u.get("uuid")
+        inbounds = xray.list_inbounds()
+        for ib in inbounds:
+            tag = ib.get("tag")
+            email = f"{username}@{tag}"
+            ok, err = xray.remove_user(tag, email)
+            logger.info("delete_user: %s (uuid=%s) -> %s", email, user_uuid, ok)
+            xray_results.append({"tag": tag, "ok": ok, "error": err})
+    
+    # Then delete from DB
+    core.delete_user(username)
+    
     logger.info("User deleted: %s by %s", username, user)
-    return {"status": "deleted"}
+    return {"status": "deleted", "xray": xray_results}
+    
+    logger.info("User deleted: %s by %s", username, user)
+    return {"status": "deleted", "xray": xray_results}
 
 @app.post("/api/users/{username}/password")
 def change_password(username: str, data: PasswordRequest, user: str = Depends(get_current_user)):
@@ -559,21 +597,22 @@ def check_file_exists(filename: str, user: str = Depends(get_current_user)):
 
 @app.post("/api/sync")
 def sync(user: str = Depends(get_current_user)):
-    logger.info("Manual sync triggered by %s", user)
-    return core.sync()
+    logger.info("Manual sync: disabled for XUI panel")
+    return {"status": "skipped", "reason": "sync disabled - use XUI panel directly"}
 
 @app.get("/api/system")
 def system_info(user: str = Depends(get_current_user)):
+    logger.info("system_info called by %s", user)
     iface = cfg["IFACE"]
     try:
         info = monitor.system_info() or {}
     except Exception as e:
-        logger.error("monitor.system_info() failed: %s\n%s", e, traceback.format_exc())
+        logger.error("monitor.system_info() failed: %s", e)
         info = {}
     try:
         bw = monitor.bandwidth_usage(iface) or {}
     except Exception as e:
-        logger.error("monitor.bandwidth_usage(%r) failed: %s\n%s", iface, e, traceback.format_exc())
+        logger.error("monitor.bandwidth_usage(%r) failed: %s", iface, e)
         bw = {}
     return {
         "ip":           monitor.public_ip(),
@@ -777,8 +816,7 @@ async def restore_db(file: UploadFile = File(...), user: str = Depends(get_curre
     shutil.copy(tmp, "/root/srtunnel/users.db")
     os.remove(tmp)
     core.init_db()
-    core.sync()
-    logger.info("DB restored by %s", user)
+    logger.info("DB restored by %s (sync disabled for XUI panel)", user)
     return {"status": "restored"}
 
 @app.post("/api/merge-db")

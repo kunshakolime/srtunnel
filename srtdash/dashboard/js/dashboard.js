@@ -1,16 +1,13 @@
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
+const LOADING_HTML = '<div style="text-align:center;padding:40px"><span class="spinner"></span><div style="margin-top:10px;color:var(--text3)">Loading...</div></div>';
+
 async function loadDashboard() {
+  document.getElementById('metrics').innerHTML = LOADING_HTML;
   try {
     const res = await apiFetch('/api/system');
     if (!res.ok) {
-      const err = await res.text();
-      document.getElementById('metrics').innerHTML = '<div class="metric"><div class="metric-label">Unable to load metrics</div><div class="metric-value">See console for details</div></div>';
-      document.getElementById('bwDown').textContent = '—';
-      document.getElementById('bwUp').textContent = '—';
-      toast('Dashboard load failed', 'err');
-      console.error('loadDashboard failed:', res.status, err);
-      return;
+      throw new Error('system failed: ' + res.status);
     }
     const d = await res.json();
     const cpu = Math.round(d.cpu || 0);
@@ -56,93 +53,157 @@ async function loadDashboard() {
     markRefresh();
   } catch (e) {
     console.error('Dashboard error', e);
+    document.getElementById('metrics').innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
+  }
+}
+    const res = await apiFetch('/api/system');
+    if (!res.ok) {
+      throw new Error('system failed: ' + res.status);
+    }
+    const d = await res.json();
+    const cpu = Math.round(d.cpu || 0);
+    const ram = Math.round(d.ram_percent || 0);
+    const disk = Math.round(d.disk_percent || 0);
+    const conns = d.connections || 0;
+
+    function barColor(pct) {
+      if (pct > 85) return 'var(--red)';
+      if (pct > 60) return 'var(--yellow)';
+      return 'var(--accent)';
+    }
+
+    document.getElementById('metrics').innerHTML = `
+      <div class="metric">
+        <div class="metric-label">CPU</div>
+        <div class="metric-value">${cpu}<span style="font-size:14px;color:var(--text3)">%</span></div>
+        <div class="bar-wrap"><div class="bar" style="width:${cpu}%;background:${barColor(cpu)}"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">RAM</div>
+        <div class="metric-value">${ram}<span style="font-size:14px;color:var(--text3)">%</span></div>
+        <div class="metric-sub">${parseFloat(d.ram_used||0).toFixed(2)} / ${parseFloat(d.ram_total||0).toFixed(1)} GB</div>
+        <div class="bar-wrap"><div class="bar" style="width:${ram}%;background:${barColor(ram)}"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Disk</div>
+        <div class="metric-value">${disk}<span style="font-size:14px;color:var(--text3)">%</span></div>
+        <div class="metric-sub">${parseFloat(d.disk_used||0).toFixed(2)} / ${parseFloat(d.disk_total||0).toFixed(1)} GB</div>
+        <div class="bar-wrap"><div class="bar" style="width:${disk}%;background:${barColor(disk)}"></div></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Public IP</div>
+        <div class="metric-value" style="font-size:15px;font-family:var(--font-mono)">${d.ip || '—'}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Connections</div>
+        <div class="metric-value connections-val">${conns}</div>
+      </div>
+    `;
+    document.getElementById('bwDown').textContent = d.bandwidth?.rx || '—';
+    document.getElementById('bwUp').textContent = d.bandwidth?.tx || '—';
+    markRefresh();
+  } catch (e) {
+    console.error('Dashboard error', e);
+    document.getElementById('metrics').innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
   }
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
+const LOADING_HTML = '<div style="text-align:center;padding:40px"><span class="spinner"></span><div style="margin-top:10px;color:var(--text3)">Loading...</div></div>';
+
+// Override loading for users table (needs special formatting)
+function showUsersLoading() {
+  document.getElementById('usersBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px"><span class="spinner"></span><div style="margin-top:10px;color:var(--text3)">Loading...</div></td></tr>';
+}
+
 async function loadUsers() {
-  const [dbRes, sshRes] = await Promise.all([
-    apiFetch('/api/users'),
-    apiFetch('/api/ssh-users')
-  ]);
+  showUsersLoading();
+  try {
+    const [dbRes, sshRes] = await Promise.all([
+      apiFetch('/api/users'),
+      apiFetch('/api/ssh-users')
+    ]);
 
-  const users = dbRes.ok ? await dbRes.json() : [];
-  const sshUsersArr = sshRes.ok ? await sshRes.json() : [];
-  const sshUsers = {};
-  for (const s of sshUsersArr) {
-    sshUsers[s.username] = s;
-  }
+    if (!dbRes.ok) { throw new Error('users failed: ' + dbRes.status); }
+    
+    const users = await dbRes.json();
+    const sshUsersArr = sshRes.ok ? await sshRes.json() : [];
+    const dbUsernames = new Set(users.map(u => u.username));
+    const rows = [];
 
-  const dbUsernames = new Set(users.map(u => u.username));
-  const rows = [];
+    // Helper for formatting data
+    function _fmtBytes(b) {
+      if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(1) + "G";
+      if (b >= 1_048_576) return (b / 1_048_576).toFixed(1) + "M";
+      if (b >= 1024) return (b / 1024).toFixed(1) + "K";
+      return b;
+    }
 
-  function _fmtBytes(b) {
-    if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(1) + "G";
-    if (b >= 1_048_576) return (b / 1_048_576).toFixed(1) + "M";
-    if (b >= 1024) return (b / 1024).toFixed(1) + "K";
-    return b;
-  }
-
-  for (const u of users) {
-    const conns = u.connections || 0;
-    const max = u.max_logins;
-    const connDisplay = max ? `${conns}/${max}` : conns;
-    rows.push(`
-      <tr style="cursor:pointer" onclick="openUserPanel('${u.username}')">
-        <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
-        <td><code>${u.password}</code></td>
-        <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
-        <td><span class="badge ${u.temporary ? 'badge-temp' : 'badge-perm'}">${u.temporary ? 'Temp' : 'Perm'}</span></td>
-        <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
-        <td style="font-size:12px">${u.services && u.services.length ? u.services.join(', ') : '—'}</td>
-        <td>
-          <span class="conn-badge">
-            <span class="conn-dot"></span>${connDisplay}
-          </span>
-        </td>
-        <td style="font-size:12px">${_fmtBytes(u.download || 0)}</td>
-        <td style="font-size:12px">${_fmtBytes(u.upload || 0)}</td>
-        <td style="font-family:var(--font-mono);font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
-        <td onclick="event.stopPropagation()">
-          <div style="display:flex;gap:6px">
-            <button class="btn-sm btn-icon" title="Copy UUID" onclick="copyToClipboard('${u.uuid || ''}')">📋</button>
-            <button class="btn-sm btn-icon" title="Edit" onclick="openUserPanel('${u.username}')">✎</button>
-            <button class="btn-danger btn-icon" title="Delete" onclick="deleteUser('${u.username}')">✕</button>
-          </div>
-        </td>
-      </tr>
-    `);
-  }
-
-  for (const s of sshUsersArr) {
-    if (!dbUsernames.has(s.username)) {
+    // 1. Process Database Users
+    for (const u of users) {
+      const conns = u.connections || 0;
+      const max = u.max_logins;
+      const connDisplay = max ? `${conns}/${max}` : conns;
+      
       rows.push(`
-        <tr style="opacity:0.5" title="Not in database">
-          <td><strong style="font-family:var(--font-mono)">${s.username}</strong></td>
-          <td>—</td>
-          <td><span class="badge">Unknown</span></td>
-          <td>—</td>
-          <td>—</td>
-          <td>—</td>
-          <td>
-            <span class="conn-badge">
-              <span class="conn-dot"></span>${s.connections}
-            </span>
+        <tr style="cursor:pointer" onclick="openUserPanel('${u.username}')">
+          <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
+          <td><code>${u.password}</code></td>
+          <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
+          <td><span class="badge ${u.temporary ? 'badge-temp' : 'badge-perm'}">${u.temporary ? 'Temp' : 'Perm'}</span></td>
+          <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
+          <td style="font-size:12px">${u.services && u.services.length ? u.services.join(', ') : '—'}</td>
+          <td><span class="conn-badge"><span class="conn-dot"></span>${connDisplay}</span></td>
+          <td style="font-size:12px">${_fmtBytes(u.download || 0)}</td>
+          <td style="font-size:12px">${_fmtBytes(u.upload || 0)}</td>
+          <td style="font-family:var(--font-mono);font-size:11px">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
+          <td onclick="event.stopPropagation()">
+            <div style="display:flex;gap:6px">
+              <button class="btn-sm btn-icon" onclick="copyToClipboard('${u.uuid || ''}')">📋</button>
+              <button class="btn-danger btn-icon" onclick="deleteUser('${u.username}')">✕</button>
+            </div>
           </td>
-          <td>${_fmtBytes(s.download || 0)}</td>
-          <td>${_fmtBytes(s.upload || 0)}</td>
-          <td>—</td>
-          <td onclick="event.stopPropagation()">—</td>
         </tr>
       `);
     }
-  }
 
-  document.getElementById('usersBody').innerHTML = rows.join('') || '<tr><td colspan="11" class="empty-state">No users found</td></tr>';
+    // 2. Process SSH-only Users (those not in DB)
+    for (const s of sshUsersArr) {
+      if (!dbUsernames.has(s.username)) {
+        rows.push(`
+          <tr style="opacity:0.5" title="Not in database">
+            <td><strong style="font-family:var(--font-mono)">${s.username}</strong></td>
+            <td colspan="5" style="text-align:center">System/SSH User Only</td>
+            <td><span class="conn-badge"><span class="conn-dot"></span>${s.connections}</span></td>
+            <td>${_fmtBytes(s.download || 0)}</td>
+            <td>${_fmtBytes(s.upload || 0)}</td>
+            <td>—</td>
+            <td>—</td>
+          </tr>
+        `);
+      }
+    }
+
+    // 3. Render to DOM
+    const bodyEl = document.getElementById('usersBody');
+    if (bodyEl) {
+        bodyEl.innerHTML = rows.join('') || '<tr><td colspan="11" class="empty-state">No users found</td></tr>';
+    }
+
+    const countEl = document.getElementById('userCount');
+    if (countEl) {
+        countEl.textContent = users.length;
+    }
+
+  } catch (e) {
+    console.error('loadUsers error:', e);
+    const bodyEl = document.getElementById('usersBody');
+    if (bodyEl) bodyEl.innerHTML = `<tr><td colspan="11" style="color:var(--red)">Error: ${e.message}</td></tr>`;
+  }
 }
 
-async function doSync() {
+  async function doSync() {
   const res = await apiFetch('/api/sync', { method: 'POST' });
   const d = await res.json();
   const n = d.deleted_count || 0;
@@ -390,29 +451,35 @@ async function doSaveServices() {
 // ── Xray ─────────────────────────────────────────────────────────────────────
 
 async function loadXray() {
+  document.getElementById('xrayContent').innerHTML = '<div style="text-align:center;padding:40px">'+LOADING_HTML+'</div>';
   try {
-    // Load xray.json config
-    const configRes = await apiFetch('/api/files/xray.json');
-    let config = null;
-    if (configRes.ok) {
-      const configData = await configRes.json();
-      config = JSON.parse(configData.content);
-    }
-
     // Load inbounds
     const inboundsRes = await apiFetch('/api/xray/inbounds');
     let inbounds = [];
-    if (inboundsRes.ok) {
-      inbounds = await inboundsRes.json();
+    if (inboundsRes.ok) inbounds = await inboundsRes.json();
+    else throw new Error('Failed to load inbounds');
+
+    // Fetch users for each inbound
+    for (const ib of inbounds) {
+      const usersRes = await apiFetch(`/api/xray/inbounds/${ib.tag}/users`);
+      ib.users = usersRes.ok ? await usersRes.json() : [];
     }
 
-    // Load users
+    // Load all DB users
     const usersRes = await apiFetch('/api/users');
-    let users = [];
-    if (usersRes.ok) {
-      users = await usersRes.json();
+    let dbUsers = [];
+    if (usersRes.ok) dbUsers = await usersRes.json();
+    else throw new Error('Failed to load users');
+    const xrayUsers = dbUsers.filter(u => u.services && u.services.includes('xray'));
+    const dbUsernames = new Set(xrayUsers.map(u => u.username));
+
+    // Build user list for all inbounds combined
+    const allInboundUsers = [];
+    for (const ib of inbounds) {
+      for (const u of ib.users || []) {
+        allInboundUsers.push({ ...u, inbound: ib.tag, inDb: dbUsernames.has(u.email) || dbUsernames.has(u.email?.split('@')[0]) });
+      }
     }
-    const xrayUsers = users.filter(u => u.services && u.services.includes('xray'));
 
     document.getElementById('xrayContent').innerHTML = `
       <div class="card">
@@ -445,22 +512,24 @@ async function loadXray() {
           </table>
         </div>
 
-        <h5>Xray Users (${xrayUsers.length})</h5>
+        <h5 style="margin-top:24px">All Xray Users (${allInboundUsers.length})</h5>
         <div class="table-wrap">
           <table>
             <thead><tr>
-              <th>Username</th><th>UUID</th><th>Status</th><th>Expiry</th><th>Connections</th>
+              <th>Email</th><th>UUID</th><th>Inbound</th><th>Status</th><th>Actions</th>
             </tr></thead>
             <tbody>
-              ${xrayUsers.map(u => `
-                <tr>
-                  <td><strong style="font-family:var(--font-mono)">${u.username}</strong></td>
-                  <td style="font-family:var(--font-mono);font-size:11px" title="${u.uuid || '—'}">${u.uuid ? u.uuid.substring(0,8) + '...' : '—'}</td>
-                  <td><span class="badge ${u.status === 'Active' ? 'badge-active' : 'badge-inactive'}">${u.status}</span></td>
-                  <td style="font-family:var(--font-mono);font-size:12px">${u.expires ? u.expires.substring(0,10) : 'Never'}</td>
-                  <td><span class="conn-badge"><span class="conn-dot"></span>${u.connections || 0}</span></td>
+              ${allInboundUsers.length ? allInboundUsers.map(u => `
+                <tr class="${u.inDb ? '' : 'row-dimmed'}">
+                  <td><strong style="font-family:var(--font-mono)">${u.email}</strong></td>
+                  <td style="font-family:var(--font-mono);font-size:11px" title="${u.id}">${u.id ? u.id.substring(0,8) + '...' : '—'}</td>
+                  <td><span class="badge">${u.inbound}</span></td>
+                  <td><span class="badge ${u.inDb ? 'badge-active' : 'badge-inactive'}">${u.inDb ? 'Known' : 'Unknown'}</span></td>
+                  <td>
+                    <button class="btn-sm btn-danger" onclick="deleteInboundUser('${u.inbound}', '${u.email}')">Delete</button>
+                  </td>
                 </tr>
-              `).join('')}
+              `).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3)">No users in any inbound</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -771,32 +840,43 @@ async function viewInboundUsers(tag) {
   const modal = document.createElement('div');
   modal.id = uniqueId;
   modal.className = 'modal';
+  modal.style.display = 'flex';
   modal.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>Users in ${tag}</h3>
-        <button class="modal-close" onclick="closeXrayModal('${uniqueId}')">&times;</button>
-      </div>
-      <div class="modal-body">
-        ${users.length ? `
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Username</th><th>ID</th></tr></thead>
-              <tbody>
-                ${users.map(u => `<tr><td>${u.username}</td><td style="font-family:monospace;font-size:12px">${u.id}</td></tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
-        ` : '<p>No users in this inbound</p>'}
+    <div class="modal-box" style="max-width:600px">
+      <h4>Users in ${tag}</h4>
+      <div class="table-wrap" style="max-height:400px;overflow:auto">
+        <table>
+          <thead><tr><th>Email</th><th>UUID</th><th>Action</th></tr></thead>
+          <tbody>
+            ${users.length ? users.map(u => `
+              <tr>
+                <td style="font-family:var(--font-mono)">${u.email}</td>
+                <td style="font-family:var(--font-mono);font-size:11px">${u.id ? u.id.substring(0,8)+'...' : '—'}</td>
+                <td><button class="btn-sm btn-danger" onclick="deleteInboundUser('${tag}', '${u.email}')">Delete</button></td>
+              </tr>
+            `).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--text3)">No users</td></tr>'}
+          </tbody>
+        </table>
       </div>
       <div class="modal-footer">
-        <button class="btn-secondary" onclick="closeXrayModal('${uniqueId}')">Close</button>
+        <button class="btn-sm" onclick="document.getElementById('${uniqueId}').remove()">Close</button>
       </div>
     </div>
   `;
   document.body.appendChild(modal);
-  modal.classList.add('open');
-  modal.addEventListener('click', e => { if (e.target === modal) closeXrayModal(uniqueId); });
+}
+
+async function deleteInboundUser(tag, clientUuid) {
+  // clientUuid is actually email here
+  if (!confirm(`Delete user ${clientUuid} from ${tag}?`)) return;
+  const res = await apiFetch(`/api/xray/inbounds/${tag}/users/${encodeURIComponent(clientUuid)}`, { method: 'DELETE' });
+  if (res.ok) {
+    toast('User removed');
+    loadXray();
+  } else {
+    const data = await res.json();
+    toast(data.detail || 'Failed to delete', 'err');
+  }
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
