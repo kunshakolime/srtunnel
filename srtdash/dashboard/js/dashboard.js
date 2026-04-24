@@ -56,61 +56,8 @@ async function loadDashboard() {
     document.getElementById('metrics').innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
   }
 }
-    const res = await apiFetch('/api/system');
-    if (!res.ok) {
-      throw new Error('system failed: ' + res.status);
-    }
-    const d = await res.json();
-    const cpu = Math.round(d.cpu || 0);
-    const ram = Math.round(d.ram_percent || 0);
-    const disk = Math.round(d.disk_percent || 0);
-    const conns = d.connections || 0;
-
-    function barColor(pct) {
-      if (pct > 85) return 'var(--red)';
-      if (pct > 60) return 'var(--yellow)';
-      return 'var(--accent)';
-    }
-
-    document.getElementById('metrics').innerHTML = `
-      <div class="metric">
-        <div class="metric-label">CPU</div>
-        <div class="metric-value">${cpu}<span style="font-size:14px;color:var(--text3)">%</span></div>
-        <div class="bar-wrap"><div class="bar" style="width:${cpu}%;background:${barColor(cpu)}"></div></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">RAM</div>
-        <div class="metric-value">${ram}<span style="font-size:14px;color:var(--text3)">%</span></div>
-        <div class="metric-sub">${parseFloat(d.ram_used||0).toFixed(2)} / ${parseFloat(d.ram_total||0).toFixed(1)} GB</div>
-        <div class="bar-wrap"><div class="bar" style="width:${ram}%;background:${barColor(ram)}"></div></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Disk</div>
-        <div class="metric-value">${disk}<span style="font-size:14px;color:var(--text3)">%</span></div>
-        <div class="metric-sub">${parseFloat(d.disk_used||0).toFixed(2)} / ${parseFloat(d.disk_total||0).toFixed(1)} GB</div>
-        <div class="bar-wrap"><div class="bar" style="width:${disk}%;background:${barColor(disk)}"></div></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Public IP</div>
-        <div class="metric-value" style="font-size:15px;font-family:var(--font-mono)">${d.ip || '—'}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Connections</div>
-        <div class="metric-value connections-val">${conns}</div>
-      </div>
-    `;
-    document.getElementById('bwDown').textContent = d.bandwidth?.rx || '—';
-    document.getElementById('bwUp').textContent = d.bandwidth?.tx || '—';
-    markRefresh();
-  } catch (e) {
-    console.error('Dashboard error', e);
-    document.getElementById('metrics').innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
-  }
-}
 
 // ── Users ─────────────────────────────────────────────────────────────────────
-
-const LOADING_HTML = '<div style="text-align:center;padding:40px"><span class="spinner"></span><div style="margin-top:10px;color:var(--text3)">Loading...</div></div>';
 
 // Override loading for users table (needs special formatting)
 function showUsersLoading() {
