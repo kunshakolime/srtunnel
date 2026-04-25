@@ -124,8 +124,9 @@ cat > /etc/nginx/stream-enabled/srtdash << EOF
 map_hash_bucket_size 128;
 
 map \$ssl_preread_server_name \$backend {
-    default      127.0.0.1:8444;
-    rt1.$DOMAIN  127.0.0.1:8443;
+    default      127.0.0.1:8443;
+        $DOMAIN  127.0.0.1:8444;
+    rt1.$DOMAIN  127.0.0.1:8444;
     rt2.$DOMAIN  127.0.0.1:8445;
     rt3.$DOMAIN  127.0.0.1:8446;
 }
