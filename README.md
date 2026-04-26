@@ -13,12 +13,12 @@ AS THE ROOT USER:
  set up your desired variables (you can leave most of them empty and they'll default.)
 
 ```bash
-export HTTP="" \
+export TOKEN="your_telegram_token_here" \
+       DOMAIN="your_domain_or_subdomain.com" \
+       XRAY_PASS="3x-ui-dashboard-pass" \
+       HTTP="" \
        HTTPS="" \
        IFACE="" \
-       TOKEN="your_telegram_token_here" \
-       DOMAIN="your_domain_or_subdomain.com" \
-       RUN_SPEEDTEST="" \
        SSH="" \
        H1_PR="" \
        H2_PR="" \
@@ -26,6 +26,7 @@ export HTTP="" \
        UC_PR="" \
 ```
 ```bash
-apt update -qq && apt install -y -qq curl && . <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/debinstall.sh)
+. <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/debinstall.sh)
+. <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh)
 ```
 
