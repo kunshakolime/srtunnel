@@ -3,8 +3,9 @@ from pathlib import Path
 from jose import jwt, JWTError
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import secrets
 
-SECRET_KEY = "change-this-to-a-random-string"
+SECRET_KEY = secrets.token_hex(32)
 ALGORITHM  = "HS256"
 
 TOKENS_FILE = Path("/root/srtunnel/helpers/tokens.json")
