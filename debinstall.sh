@@ -11,6 +11,7 @@ DEFAULT_IFACE="$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | hea
 SSL_DEF="8443"
 HTTP_DEF="80, 8080, 8000, 8880"
 HTTPS_DEF="8446"
+MY_SPEED="? Mbps"
 
 fetch()      { local src="$1" dst="$2"; [[ "$src" == http* ]] || src="${REPO}$src"; curl -fsSL "$src" -o "$dst" || echo "WARNING: failed to fetch $src"; }
 speedtest() {
@@ -95,12 +96,6 @@ DOMAIN="${DOMAIN:-}"
 SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd.$DOMAIN}"
 
 
-if [[ "$RUN_TEST" =~ ^[Yy]$ ]]; then
-    echo "Running speedtest..."; MY_SPEED=$(speedtest); echo "Speed: $MY_SPEED"
-else
-    MY_SPEED="? Mbps"
-    echo "Skipping speedtest."
-fi
 export IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE XRAY_PASS
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
