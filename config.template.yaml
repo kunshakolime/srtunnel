@@ -10,7 +10,7 @@ manager:
   - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053
   - echo "starting..."
   - sleep 3
-  keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, xray, stunnel, tracker]
+  keep: [telegram_bot, websocket, badvpn, udp-custom, slowdns, stunnel, tracker]
   enable: [udp-rules]
   services:
     stunnel: stunnel
