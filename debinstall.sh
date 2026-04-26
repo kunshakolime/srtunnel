@@ -81,7 +81,7 @@ H1_PR="${H1_PR:-$H1_DEF}"
 H2_PR="${H2_PR:-$H2_DEF}"
 ZU_PR="${ZU_PR:-$ZU_DEF}"
 UC_PR="${UC_PR:-$UC_DEF}"
-RUN_TEST="${RUN_SPEEDTEST:-Y}"
+RUN_TEST="${RUN_SPEEDTEST:-N}"
 SSL="${SSL:-$SSL_DEF}"
 HTTP="${HTTP:-$HTTP_DEF}"
 HTTPS="${HTTPS:-$HTTPS_DEF}"
@@ -92,7 +92,7 @@ CF_ZONE="${CF_ZONE:-}"
 # These usually require user-specific values, so they remain empty if not set
 TOKEN="${TOKEN:-}"
 DOMAIN="${DOMAIN:-}"
-SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd$DOMAIN}"
+SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd.$DOMAIN}"
 
 
 if [[ "$RUN_TEST" =~ ^[Yy]$ ]]; then
@@ -101,7 +101,7 @@ else
     MY_SPEED="? Mbps"
     echo "Skipping speedtest."
 fi
-export IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE
+export IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE XRAY_PASS
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
 # ── Setup Nginx ─────────────────────────────────────────────────────────────
