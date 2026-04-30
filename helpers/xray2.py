@@ -149,12 +149,40 @@ class XUIClient:
 # ── Singleton client (login once) ───────────────────────────────────────────────────────
 _xray_client = None
 
-def get_xray_client() -> XUIClient:
+def _ensure_login():
+    """Ensure client is logged in, re-login if session expired."""
     global _xray_client
     if _xray_client is None:
         _xray_client = XUIClient()
         _xray_client.login(XUI_USER, XUI_PASS)
+        return
+    try:
+        # Quick health check
+        resp = _xray_client.session.get(_xray_client._url("panel/api/inbounds/list"), headers={"Accept": "application/json"}, timeout=5)
+        if resp.status_code == 401 or (resp.status_code == 200 and not resp.json().get("success")):
+            _xray_client = XUIClient()
+            _xray_client.login(XUI_USER, XUI_PASS)
+            logger.info("Re-login to XUI panel successful")
+    except Exception as e:
+        logger.warning("XUI health check failed, re-logging: %s", e)
+        _xray_client = XUIClient()
+        _xray_client.login(XUI_USER, XUI_PASS)
+
+def get_xray_client() -> XUIClient:
+    """Get the singleton client, ensuring it is logged in."""
+    _ensure_login()
     return _xray_client
+
+def _api_call(fn, *args, **kwargs):
+    """Execute XUI API call, retry once on 401/404."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        if "401" in str(e) or "404" in str(e):
+            logger.warning("Session expired, re-logging in...")
+            _ensure_login()
+            return fn(*args, **kwargs)
+        raise
 
 
 # ── Backward compat wrappers ─────────────────────────────────────────────────
@@ -163,78 +191,94 @@ _tag_cache = {}
 def _get_inbound_id(tag: str) -> Optional[int]:
     if tag in _tag_cache:
         return _tag_cache[tag]
-    client = get_xray_client()
-    inbounds = client.list_inbounds()
-    if not inbounds.get("success"):
+    
+    def do_list():
+        client = get_xray_client()
+        return client.list_inbounds()
+    
+    data = _api_call(do_list)
+    if not data.get("success"):
         return None
-    for ib in inbounds.get("obj", []):
+    for ib in data.get("obj", []):
         if ib.get("tag") == tag:
             _tag_cache[tag] = ib.get("id")
             return ib.get("id")
     return None
 
 def list_inbounds() -> list[dict]:
-    client = get_xray_client()
-    data = client.list_inbounds()
-    return data.get("obj", []) if data.get("success") else []
+    def do_list():
+        client = get_xray_client()
+        data = client.list_inbounds()
+        return data.get("obj", []) if data.get("success") else []
+    return _api_call(do_list)
 
 def add_inbound(inbound: dict) -> tuple[bool, str]:
-    client = get_xray_client()
-    result = client.add_inbound(inbound)
-    if not result.get("success"):
-        return False, result.get("msg", "Failed to add inbound")
-    _tag_cache.clear()
-    return True, "ok"
+    def do_add():
+        client = get_xray_client()
+        result = client.add_inbound(inbound)
+        if not result.get("success"):
+            return False, result.get("msg", "Failed to add inbound")
+        _tag_cache.clear()
+        return True, "ok"
+    return _api_call(do_add)
 
 def remove_inbound(tag: str) -> tuple[bool, str]:
-    client = get_xray_client()
-    inbound_id = _get_inbound_id(tag)
-    if not inbound_id:
-        return False, f"inbound '{tag}' not found"
-    result = client.delete_inbound(inbound_id)
-    if not result.get("success"):
-        return False, result.get("msg", "Failed to remove inbound")
-    _tag_cache.pop(tag, None)
-    return True, "ok"
+    def do_remove():
+        client = get_xray_client()
+        inbound_id = _get_inbound_id(tag)
+        if not inbound_id:
+            return False, f"inbound '{tag}' not found"
+        result = client.delete_inbound(inbound_id)
+        if not result.get("success"):
+            return False, result.get("msg", "Failed to remove inbound")
+        _tag_cache.pop(tag, None)
+        return True, "ok"
+    return _api_call(do_remove)
 
 def list_users(tag: str) -> list[dict]:
-    client = get_xray_client()
-    inbound_id = _get_inbound_id(tag)
-    if not inbound_id:
-        return []
-    return client.get_inbound_users(inbound_id)
+    def do_list_users():
+        client = get_xray_client()
+        inbound_id = _get_inbound_id(tag)
+        if not inbound_id:
+            return []
+        return client.get_inbound_users(inbound_id)
+    return _api_call(do_list_users)
 
 def add_user(tag: str, email: str, *, uid: str = None, password: str = None, flow: str = "", alter_id: int = 0) -> tuple[bool, str, str]:
-    client = get_xray_client()
-    inbound_id = _get_inbound_id(tag)
-    if not inbound_id:
-        return False, "", f"inbound '{tag}' not found"
-    if not uid:
-        import uuid as uuid_lib
-        uid = str(uuid_lib.uuid4())
-    result = client.add_user(inbound_id, email, uid)
-    if not result.get("success"):
-        return False, "", result.get("msg", "Failed to add user")
-    return True, uid, ""
+    def do_add_user():
+        client = get_xray_client()
+        inbound_id = _get_inbound_id(tag)
+        if not inbound_id:
+            return False, "", f"inbound '{tag}' not found"
+        if not uid:
+            import uuid as uuid_lib
+            uid = str(uuid_lib.uuid4())
+        result = client.add_user(inbound_id, email, uid)
+        if not result.get("success"):
+            return False, "", result.get("msg", "Failed to add user")
+        return True, uid, ""
+    return _api_call(do_add_user)
 
 def remove_user(tag: str, email: str) -> tuple[bool, str]:
-    client = get_xray_client()
-    inbound_id = _get_inbound_id(tag)
-    if not inbound_id:
-        return False, f"inbound '{tag}' not found"
-    users = client.get_inbound_users(inbound_id)
-    client_uuid = None
-    for u in users:
-        em = u.get("email", "")
-        if em == email or em == f"{email}@{tag}":
-            client_uuid = u.get("id")
-            break
-    if not client_uuid:
-        return False, f"user '{email}' not found"
-    result = client.remove_user(inbound_id, client_uuid)
-    if not result.get("success"):
-        return False, result.get("msg", "Failed to remove user")
-    return True, "ok"
+    def do_remove_user():
+        client = get_xray_client()
+        inbound_id = _get_inbound_id(tag)
+        if not inbound_id:
+            return False, f"inbound '{tag}' not found"
+        users = client.get_inbound_users(inbound_id)
+        client_uuid = None
+        for u in users:
+            em = u.get("email", "")
+            if em == email or em == f"{email}@{tag}":
+                client_uuid = u.get("id")
+                break
+        if not client_uuid:
+            return False, f"user '{email}' not found"
+        result = client.remove_user(inbound_id, client_uuid)
+        if not result.get("success"):
+            return False, result.get("msg", "Failed to remove user")
+        return True, "ok"
+    return _api_call(do_remove_user)
 
 def sync_users_to_inbound(tag: str, active_users: list[dict]) -> bool:
     logger.warning("sync_users_to_inbound disabled for XUI panel")

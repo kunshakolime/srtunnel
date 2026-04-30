@@ -108,6 +108,21 @@ function toast(msg, type = 'ok') {
 
 // ── Login page ────────────────────────────────────────────────────────────────
 
+function togglePassVisibility() {
+  const input = document.getElementById('loginPass');
+  const eyeOff = document.getElementById('passEyeOff');
+  const eyeOn = document.getElementById('passEyeOn');
+  if (input.type === 'password') {
+    input.type = 'text';
+    eyeOff.style.display = 'none';
+    eyeOn.style.display = '';
+  } else {
+    input.type = 'password';
+    eyeOff.style.display = '';
+    eyeOn.style.display = 'none';
+  }
+}
+
 async function doLogin() {
   const url  = document.getElementById('apiUrl').value.trim().replace(/\/$/, '');
   const name = document.getElementById('serverName').value.trim() || url.replace(/^https?:\/\//, '').split(':')[0];
@@ -335,6 +350,8 @@ function escHtml(s) {
       HOME_API = ''; HOME_TOKEN = '';
       document.getElementById('loginPage').style.display = '';
       document.getElementById('app').style.display       = 'none';
+      const apiUrlInput = document.getElementById('apiUrl');
+      if (!apiUrlInput.value) apiUrlInput.value = window.location.origin;
       return;
     }
     applyActive();
@@ -343,4 +360,6 @@ function escHtml(s) {
   }
   document.getElementById('loginPage').style.display = '';
   document.getElementById('app').style.display       = 'none';
+  const apiUrlInput = document.getElementById('apiUrl');
+  if (!apiUrlInput.value) apiUrlInput.value = window.location.origin;
 })();
