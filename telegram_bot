@@ -730,13 +730,33 @@ async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  #
 
     elif data == "add_user":
         leave_menu()
-        context.user_data["action"] = "add_user"
+        context.user_data["action"] = "add_user_step1"
         await q.edit_message_text(
-            "*➕ Add User*\n\n"
-            "Format: `username [days] [temp] [pwd:pass] [limit:N]`\n\n"
-            "Examples:\n`alice`\n`alice 30`\n`alice 7 temp`\n"
-            "`alice pwd:secret`\n`alice limit:2`\n\n/cancel to go back",
+            "*➕ Add User — Step 1/2*\n\n"
+            "Send username:\n\n/cancel to go back",
             parse_mode="Markdown", reply_markup=kb_menu())
+
+    elif data == "xray_all_users":
+        leave_menu()
+        inbounds = await api_get(server, "/api/xray/inbounds")
+        all_users = []
+        if isinstance(inbounds, list):
+            for ib in inbounds:
+                tag = ib.get("tag", "?")
+                users = await api_get(server, f"/api/xray/inbounds/{tag}/users")
+                if isinstance(users, list):
+                    for u in users:
+                        all_users.append({**u, "inbound": tag})
+        if not all_users:
+            await q.edit_message_text("ℹ️ No Xray users found", reply_markup=kb_xray()); return
+        lines = [f"*⚡ All Xray Users — {len(all_users)}*\n"]
+        for u in all_users:
+            email = u.get("email", "?")
+            uuid_short = (u.get("id") or "")[:8]
+            lines.append(f"• `{email}` `{uuid_short}…` → `{u['inbound']}`")
+        rows = [[InlineKeyboardButton("🔙 Xray", callback_data="xray_menu")]]
+        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
+                                  reply_markup=InlineKeyboardMarkup(rows))
 
     # ══════════════════════════════════════════════════════════════════════════
     # SERVICES
@@ -952,10 +972,11 @@ async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  #
                 port  = ib.get("port", "")
                 rows.append([InlineKeyboardButton(
                     f"📡 {tag} ({proto}:{port})", callback_data=f"xray_ib_{tag}")])
-        rows.append([InlineKeyboardButton("➕ Add Inbound", callback_data="xray_add_inbound"),
-                     InlineKeyboardButton("🔙 Menu",        callback_data="back_to_menu")])
+        rows.append([InlineKeyboardButton("👥 All Users", callback_data="xray_all_users"),
+                     InlineKeyboardButton("➕ Add Inbound", callback_data="xray_add_inbound")])
+        rows.append([InlineKeyboardButton("🔙 Menu",        callback_data="back_to_menu")])
         await q.edit_message_text(
-            f"*⚡ Xray Inbounds* — {len(rows)-1} configured",
+            f"*⚡ Xray Inbounds* — {len(rows)-2} configured",
             parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
 
     elif data.startswith("xray_ib_"):
@@ -1180,37 +1201,131 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
 
+async def _finish_add_user(update, server, username, days, temporary, password, max_logins, xray_inbounds):
+    payload = {"username": username, "temporary": temporary}
+    if days:       payload["days"]       = days
+    if password:   payload["password"]   = password
+    if max_logins: payload["max_logins"] = max_logins
+    if xray_inbounds:
+        payload["services"] = ["ssh", "xray"]
+        payload["xray_inbounds"] = xray_inbounds
+    r = await api_post(server, "/api/users", json=payload)
+    msg = (f"✅ *{'Temp' if temporary else 'User'} Added*\n\n"
+           f"`{r['username']}` • `{r['password']}`\n"
+           f"Expires: {r.get('expires') or 'Never'}")
+    if r.get("max_logins"): msg += f"\nMax Logins: {r['max_logins']}"
+    if not r.get("linux_ok", True): msg += "\n\n⚠️ Linux user creation failed"
+    xray_results = r.get("xray", [])
+    if xray_results:
+        msg += "\n\n*⚡ Xray:*\n"
+        for xr in xray_results:
+            icon = "✅" if xr.get("ok") else "❌"
+            msg += f"{icon} `{xr['tag']}`\n"
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb_menu())
+
+
 async def _handle_text(update, context, uid, server, sess, action, text):  # noqa: C901
 
-    if action == "add_user":
-        parts    = text.split()
-        username = parts[0]
-        days, temporary, password, max_logins = None, False, None, None
-        rest = []
-        for p in parts[1:]:
-            if   p.startswith("pwd:"):   password = p[4:]
-            elif p.startswith("limit:"):
-                try:    max_logins = int(p[6:]); assert max_logins > 0
-                except: await update.message.reply_text("❌ Invalid limit"); return
-            else: rest.append(p)
-        if rest:
-            try: days = int(rest[0])
-            except ValueError:
-                if rest[0].lower() in ("temp","temporary","t"): temporary = True
-                else: await update.message.reply_text("❌ Invalid format"); return
-        if len(rest) >= 2 and rest[1].lower() in ("temp","temporary","t"):
-            temporary = True
-        payload = {"username": username, "temporary": temporary}
-        if days:       payload["days"]       = days
-        if password:   payload["password"]   = password
-        if max_logins: payload["max_logins"] = max_logins
-        r = await api_post(server, "/api/users", json=payload)
-        msg = (f"✅ *{'Temp' if temporary else 'User'} Added*\n\n"
-               f"`{r['username']}` • `{r['password']}`\n"
-               f"Expires: {r.get('expires') or 'Never'}")
-        if r.get("max_logins"): msg += f"\nMax Logins: {r['max_logins']}"
-        if not r.get("linux_ok", True): msg += "\n\n⚠️ Linux user creation failed"
-        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb_menu())
+    if action == "add_user_step1":
+        username = text.split()[0]
+        if not username:
+            await update.message.reply_text("❌ Username required"); return
+        context.user_data["add_user_username"] = username
+        context.user_data["action"] = "add_user_step2"
+        await update.message.reply_text(
+            f"*➕ Add User — Step 2/2*\n\n"
+            f"Username: `{username}`\n\n"
+            "Send options or type `skip`:\n"
+            "`[days] [temp] [pwd:pass] [limit:N]`\n\n"
+            "Examples:\n`30`\n`7 temp`\n`pwd:secret`\n`limit:2`\n"
+            "`30 pwd:mypass limit:3`\n\n/cancel to go back",
+            parse_mode="Markdown", reply_markup=kb_menu())
+
+    elif action == "add_user_step2":
+        username = context.user_data.pop("add_user_username", None)
+        if not username:
+            await update.message.reply_text("❌ Session expired"); context.user_data.clear(); return
+
+        if text.lower() in ("skip", "none", "-"):
+            days, temporary, password, max_logins = None, False, None, None
+        else:
+            parts = text.split()
+            days, temporary, password, max_logins = None, False, None, None
+            rest = []
+            for p in parts:
+                if   p.startswith("pwd:"):   password = p[4:]
+                elif p.startswith("limit:"):
+                    try:    max_logins = int(p[6:]); assert max_logins > 0
+                    except: await update.message.reply_text("❌ Invalid limit"); return
+                else: rest.append(p)
+            if rest:
+                try: days = int(rest[0])
+                except ValueError:
+                    if rest[0].lower() in ("temp","temporary","t"): temporary = True
+                    else: await update.message.reply_text("❌ Invalid format"); return
+            if len(rest) >= 2 and rest[1].lower() in ("temp","temporary","t"):
+                temporary = True
+
+        context.user_data.update(
+            action="add_user_step3",
+            add_user_username=username,
+            add_user_days=days,
+            add_user_temporary=temporary,
+            add_user_password=password,
+            add_user_max_logins=max_logins,
+        )
+
+        inbounds = await api_get(server, "/api/xray/inbounds")
+        if not isinstance(inbounds, list) or not inbounds:
+            await _finish_add_user(update, server, username, days, temporary, password, max_logins, [])
+            context.user_data.clear()
+            return
+
+        lines = [f"*➕ Add User — Select Inbounds*\n\n"
+                 f"Username: `{username}`\n"]
+        if days: lines.append(f"Days: `{days}`")
+        if temporary: lines.append("Type: `Temporary`")
+        if password: lines.append(f"Password: `{password}`")
+        if max_logins: lines.append(f"Limit: `{max_logins}`")
+        lines.append("\nReply with inbound numbers (comma-separated), or `all`, or `none`:")
+        for i, ib in enumerate(inbounds, 1):
+            tag = ib.get("tag", "?")
+            proto = ib.get("protocol", "")
+            port = ib.get("port", "")
+            lines.append(f"`{i}.` {tag} ({proto}:{port})")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=kb_menu())
+
+    elif action == "add_user_step3":
+        username = context.user_data.pop("add_user_username")
+        days = context.user_data.pop("add_user_days")
+        temporary = context.user_data.pop("add_user_temporary")
+        password = context.user_data.pop("add_user_password")
+        max_logins = context.user_data.pop("add_user_max_logins")
+
+        inbounds = await api_get(server, "/api/xray/inbounds")
+        if not isinstance(inbounds, list):
+            inbounds = []
+
+        selected = []
+        text_lower = text.lower().strip()
+        if text_lower == "none" or text_lower == "0":
+            selected = []
+        elif text_lower == "all":
+            selected = [ib.get("tag") for ib in inbounds if ib.get("tag")]
+        else:
+            indices = [x.strip() for x in text.split(",") if x.strip()]
+            for idx_str in indices:
+                try:
+                    idx = int(idx_str) - 1
+                    if 0 <= idx < len(inbounds):
+                        tag = inbounds[idx].get("tag")
+                        if tag:
+                            selected.append(tag)
+                except ValueError:
+                    pass
+
+        await _finish_add_user(update, server, username, days, temporary, password, max_logins, selected)
         context.user_data.clear()
 
     elif action == "set_maxlogins":
