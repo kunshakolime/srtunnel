@@ -548,7 +548,87 @@ def set_user_services(username: str, data: SetServicesRequest, user: str = Depen
     return {"username": username, "services": u.get("services", []) if u else []}
 
 
-# ── File Management ───────────────────────────────────────────────────────────
+# ── File Manager ───────────────────────────────────────────────────────────
+
+class FileOpRequest(BaseModel):
+    path: str
+    content: Optional[str] = None
+
+def _resolve_file_path(p: str) -> str:
+    """Resolve a file path, treating '.' as '/'. Never allows escaping root."""
+    if not p or p == ".":
+        return "/"
+    full = os.path.normpath("/" + p.lstrip("/"))
+    return full
+
+@app.get("/api/files/list")
+@app.get("/api/files/list/")
+def list_files_root(user: str = Depends(get_current_user)):
+    return files.list_directory("/")
+
+@app.get("/api/files/list/{directory:path}")
+def list_files(directory: str, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(directory)
+    result = files.list_directory(full_path)
+    return result
+
+@app.post("/api/files/create/{filepath:path}")
+def create_file(filepath: str, data: FileOpRequest, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(filepath)
+    ok = files.create_file(full_path, data.content or "")
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to create file")
+    return {"status": "created", "path": filepath}
+
+@app.post("/api/files/create-dir/{directory:path}")
+def create_dir(directory: str, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(directory)
+    ok = files.create_directory(full_path)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to create directory")
+    return {"status": "created", "path": directory}
+
+@app.get("/api/files/read/{filepath:path}")
+def read_file(filepath: str, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(filepath)
+    try:
+        content = files.read_file(full_path)
+        return {"path": filepath, "content": content}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+@app.post("/api/files/write/{filepath:path}")
+def write_file_endpoint(filepath: str, data: FileOpRequest, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(filepath)
+    try:
+        files.write_file(full_path, data.content or "")
+        return {"status": "written", "path": filepath}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/api/files/{filepath:path}")
+def delete_file(filepath: str, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(filepath)
+    is_dir = filepath.endswith("/")
+    ok = files.delete_path(full_path, is_dir)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Failed to delete")
+    return {"status": "deleted", "path": filepath}
+
+@app.get("/api/files/download-info/{filepath:path}")
+def download_info(filepath: str, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(filepath)
+    info = files.get_download_url(full_path)
+    if not info.get("exists"):
+        raise HTTPException(status_code=404, detail="File not found")
+    info["wget"] = files.get_wget_command(full_path)
+    info["curl"] = files.get_curl_command(full_path)
+    return info
+
+
+# ── File Management (legacy config file shortcuts) ─────────────────────────────
+# NOTE: these MUST be registered AFTER the file manager routes above,
+# otherwise /api/files/list etc. get caught by the catch-all.
 
 ALLOWED_CONFIG_FILES = {
     "xray.json",
@@ -562,37 +642,25 @@ ALLOWED_CONFIG_FILES = {
     "bannerssh",
 }
 
-@app.get("/api/files/{filename}")
-def read_config_file(filename: str, user: str = Depends(get_current_user)):
-    if filename not in ALLOWED_CONFIG_FILES:
-        raise HTTPException(status_code=403, detail="Access denied to this file")
-    try:
-        content = files.read_file(filename)
-        return {"filename": filename, "content": content}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
-
 @app.put("/api/files/{filename}")
 def write_config_file(filename: str, content: str = Body(...), user: str = Depends(get_current_user)):
-    if filename not in ALLOWED_CONFIG_FILES:
-        raise HTTPException(status_code=403, detail="Access denied to this file")
+    # Optional: Prevent path traversal by ensuring only the filename is used
+    safe_filename = os.path.basename(filename)
+    
     try:
-        files.write_file(filename, content)
-        logger.info("File updated: %s by %s", filename, user)
-        return {"filename": filename, "status": "updated"}
+        files.write_file(safe_filename, content)
+        logger.info("File updated: %s by %s", safe_filename, user)
+        return {"filename": safe_filename, "status": "updated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error writing file: {str(e)}")
 
 @app.get("/api/files/{filename}/exists")
 def check_file_exists(filename: str, user: str = Depends(get_current_user)):
-    if filename not in ALLOWED_CONFIG_FILES:
-        raise HTTPException(status_code=403, detail="Access denied to this file")
-    exists = files.file_exists(filename)
-    return {"filename": filename, "exists": exists}
-
-
+    # Optional: Prevent path traversal
+    safe_filename = os.path.basename(filename)
+    
+    exists = files.file_exists(safe_filename)
+    return {"filename": safe_filename, "exists": exists}
 # ── Sync & System ─────────────────────────────────────────────────────────────
 
 @app.post("/api/sync")
@@ -680,33 +748,6 @@ def speedtest(user: str = Depends(get_current_user)):
     except Exception as e:
         logger.error("Speedtest unexpected error: %s\n%s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Speedtest error: {type(e).__name__}: {e}")
-
-
-# ── File Management ───────────────────────────────────────────────────────────
-
-@app.get("/api/files/{filename}")
-def read_file_endpoint(filename: str, user: str = Depends(get_current_user)):
-    try:
-        content = files.read_file(filename)
-        return {"filename": filename, "content": content}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
-
-@app.put("/api/files/{filename}")
-def write_file_endpoint(filename: str, content: str = Body(...), user: str = Depends(get_current_user)):
-    try:
-        files.write_file(filename, content)
-        logger.info("File updated: %s by %s", filename, user)
-        return {"filename": filename, "status": "updated"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error writing file: {str(e)}")
-
-@app.get("/api/files/{filename}/exists")
-def check_file_exists_endpoint(filename: str, user: str = Depends(get_current_user)):
-    exists = files.file_exists(filename)
-    return {"filename": filename, "exists": exists}
 
 
 # ── Services (tmux) ───────────────────────────────────────────────────────────
@@ -797,78 +838,6 @@ def set_service_status(name: str, data: ServiceStatusRequest, user: str = Depend
     logger.info("Service status set: %s → %s by %s", name, data.status, user)
     return {"service": name, "status": detail}
 
-
-# ── File Manager ───────────────────────────────────────────────────────────
-
-class FileOpRequest(BaseModel):
-    path: str
-    content: Optional[str] = None
-
-@app.get("/api/files/list/{directory:path}")
-def list_files(directory: str, user: str = Depends(get_current_user)):
-    """List files in a directory."""
-    full_path = "/root/srtunnel/" + directory.lstrip("/")
-    result = files.list_directory(full_path)
-    return result
-
-@app.post("/api/files/create/{filepath:path}")
-def create_file(filepath: str, data: FileOpRequest, user: str = Depends(get_current_user)):
-    """Create a new file."""
-    full_path = "/root/srtunnel/" + filepath.lstrip("/")
-    ok = files.create_file(full_path, data.content or "")
-    if not ok:
-        raise HTTPException(status_code=400, detail="Failed to create file")
-    return {"status": "created", "path": filepath}
-
-@app.post("/api/files/create-dir/{directory:path}")
-def create_dir(directory: str, user: str = Depends(get_current_user)):
-    """Create a new directory."""
-    full_path = "/root/srtunnel/" + directory.lstrip("/")
-    ok = files.create_directory(full_path)
-    if not ok:
-        raise HTTPException(status_code=400, detail="Failed to create directory")
-    return {"status": "created", "path": directory}
-
-@app.get("/api/files/read/{filepath:path}")
-def read_file(filepath: str, user: str = Depends(get_current_user)):
-    """Read file content."""
-    full_path = "/root/srtunnel/" + filepath.lstrip("/")
-    try:
-        content = files.read_file(full_path)
-        return {"path": filepath, "content": content}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File not found")
-
-@app.post("/api/files/write/{filepath:path}")
-def write_file_endpoint(filepath: str, data: FileOpRequest, user: str = Depends(get_current_user)):
-    """Write file content."""
-    full_path = "/root/srtunnel/" + filepath.lstrip("/")
-    try:
-        files.write_file(full_path, data.content or "")
-        return {"status": "written", "path": filepath}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.delete("/api/files/{filepath:path}")
-def delete_file(filepath: str, user: str = Depends(get_current_user)):
-    """Delete file or directory."""
-    full_path = "/root/srtunnel/" + filepath.lstrip("/")
-    is_dir = filepath.endswith("/")
-    ok = files.delete_path(full_path, is_dir)
-    if not ok:
-        raise HTTPException(status_code=400, detail="Failed to delete")
-    return {"status": "deleted", "path": filepath}
-
-@app.get("/api/files/download-info/{filepath:path}")
-def download_info(filepath: str, user: str = Depends(get_current_user)):
-    """Get download commands for a file."""
-    full_path = "/root/srtunnel/" + filepath.lstrip("/")
-    info = files.get_download_url(full_path)
-    if not info.get("exists"):
-        raise HTTPException(status_code=404, detail="File not found")
-    info["wget"] = files.get_wget_command(full_path)
-    info["curl"] = files.get_curl_command(full_path)
-    return info
 
 @app.get("/api/backup")
 def backup_db(user: str = Depends(get_current_user)):
