@@ -18,6 +18,12 @@ def write_file(file_path: str, content: str) -> None:
     path.write_text(content, encoding='utf-8')
 
 
+def write_binary_file(file_path: str, content: bytes) -> None:
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
 def read_json_file(file_path: str) -> Any:
     content = read_file(file_path)
     return json.loads(content)
@@ -52,9 +58,10 @@ def list_directory(directory: str) -> Dict:
                 dirs.append(info)
             else:
                 files.append(info)
-    except PermissionError:
-        return {"exists": True, "error": "Permission denied", "files": [], "dirs": []}
-    
+    except PermissionError as e:
+        logger.error(f"Permission Denied accessing {path}: {e}")
+        return {"exists": True, "error": str(e), "files": [], "dirs": []}
+        
     return {"exists": True, "path": str(path), "files": files, "dirs": dirs}
 
 

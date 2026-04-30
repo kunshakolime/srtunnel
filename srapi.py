@@ -555,19 +555,20 @@ class FileOpRequest(BaseModel):
     content: Optional[str] = None
 
 def _resolve_file_path(p: str) -> str:
-    """Resolve a file path, treating '.' as '/'. Never allows escaping root."""
+    """
+    Resolves paths for system-wide access.
+    Treats empty strings or '.' as the system root '/'.
+    """
     if not p or p == ".":
         return "/"
+    
+    # normpath cleans up '..' and extra slashes
+    # prepending '/' ensures we start from the system root
     full = os.path.normpath("/" + p.lstrip("/"))
     return full
 
 @app.get("/api/files/list")
-@app.get("/api/files/list/")
-def list_files_root(user: str = Depends(get_current_user)):
-    return files.list_directory("/")
-
-@app.get("/api/files/list/{directory:path}")
-def list_files(directory: str, user: str = Depends(get_current_user)):
+def list_files(directory: str = "/", user: str = Depends(get_current_user)):
     full_path = _resolve_file_path(directory)
     result = files.list_directory(full_path)
     return result
@@ -614,6 +615,16 @@ def delete_file(filepath: str, user: str = Depends(get_current_user)):
     if not ok:
         raise HTTPException(status_code=400, detail="Failed to delete")
     return {"status": "deleted", "path": filepath}
+
+@app.post("/api/files/upload/{directory:path}")
+async def upload_file(directory: str, file: UploadFile = File(...), user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(directory)
+    if not os.path.isdir(full_path):
+        raise HTTPException(status_code=400, detail="Not a directory")
+    target = os.path.join(full_path, file.filename)
+    content = await file.read()
+    files.write_binary_file(target, content)
+    return {"status": "uploaded", "path": target}
 
 @app.get("/api/files/download-info/{filepath:path}")
 def download_info(filepath: str, user: str = Depends(get_current_user)):
@@ -838,6 +849,13 @@ def set_service_status(name: str, data: ServiceStatusRequest, user: str = Depend
     logger.info("Service status set: %s → %s by %s", name, data.status, user)
     return {"service": name, "status": detail}
 
+
+@app.get("/api/files/download/{filepath:path}")
+def download_file(filepath: str, user: str = Depends(get_current_user)):
+    full_path = _resolve_file_path(filepath)
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(full_path, filename=os.path.basename(full_path), media_type="application/octet-stream")
 
 @app.get("/api/backup")
 def backup_db(user: str = Depends(get_current_user)):
