@@ -245,14 +245,16 @@ def list_users(tag: str) -> list[dict]:
     return _api_call(do_list_users)
 
 def add_user(tag: str, email: str, *, uid: str = None, password: str = None, flow: str = "", alter_id: int = 0) -> tuple[bool, str, str]:
+    # Generate UUID outside the nested function
+    if not uid:
+        import uuid as uuid_lib
+        uid = str(uuid_lib.uuid4())
+    
     def do_add_user():
         client = get_xray_client()
         inbound_id = _get_inbound_id(tag)
         if not inbound_id:
             return False, "", f"inbound '{tag}' not found"
-        if not uid:
-            import uuid as uuid_lib
-            uid = str(uuid_lib.uuid4())
         result = client.add_user(inbound_id, email, uid)
         if not result.get("success"):
             return False, "", result.get("msg", "Failed to add user")
