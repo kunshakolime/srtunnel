@@ -81,6 +81,14 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
   background:var(--bg3);color:var(--text1);font-family:var(--font-body);font-size:14px;transition:.2s
 }
 .field input:focus{outline:none;border-color:var(--accent);background:var(--bg4)}
+.password-wrap{position:relative}
+.password-wrap input{padding-right:42px}
+.pass-toggle{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--text3);cursor:pointer;
+  padding:4px;display:flex;align-items:center;transition:.15s;border-radius:4px
+}
+.pass-toggle:hover{color:var(--text1);background:var(--bg5)}
 .divider{text-align:center;font-size:11px;color:var(--text3);margin:16px 0;position:relative}
 .divider::before,.divider::after{content:'';position:absolute;top:50%;width:40%;height:1px;background:var(--border2)}
 .divider::before{left:0} .divider::after{right:0}
