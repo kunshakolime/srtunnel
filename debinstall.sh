@@ -134,8 +134,9 @@ server {
 EOF
 
 # Add stream block to nginx.conf
-sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
-
+if ! grep -q "stream-enabled" /etc/nginx/nginx.conf; then
+    sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
+fi
 
 # ── TLS Certificate ───────────────────────────────────────────────────────────
 ./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
