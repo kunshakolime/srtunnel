@@ -188,4 +188,7 @@ systemctl enable --now srapi
 nginx -t
 systemctl enable nginx
 systemctl restart nginx
+
+. <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh)
+
 echo "tunnel up and running"
