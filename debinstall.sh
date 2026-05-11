@@ -109,7 +109,7 @@ ln -sf /etc/nginx/sites-available/srtdash /etc/nginx/sites-enabled/srtdash
 rm -f /etc/nginx/sites-enabled/default
 
 
-cp -r ./srtdash /var/www/srtdash/dashboard
+cp -r ./srtdash /var/www/srtdash
 chown -R www-data:www-data /var/www/srtdash
 chmod -R 755 /var/www/srtdash
 
