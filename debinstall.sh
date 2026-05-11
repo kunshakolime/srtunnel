@@ -108,10 +108,11 @@ envsubst '$DOMAIN' < xray.template.json > xray.json
 ln -sf /etc/nginx/sites-available/srtdash /etc/nginx/sites-enabled/srtdash
 rm -f /etc/nginx/sites-enabled/default
 
+
+cp -r ./srtdash /var/www/srtdash/dashboard
 chown -R www-data:www-data /var/www/srtdash
 chmod -R 755 /var/www/srtdash
 
-cp -r ./srtdash /var/www/
 # Create stream-enabled directory
 mkdir -p /etc/nginx/stream-enabled
 
