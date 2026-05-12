@@ -12,6 +12,11 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
+    location /3x-ui/ {
+        proxy_pass http://127.0.0.1:51701/3x-ui/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
     location /dump/ {
         alias /var/www/srtdash/dump/;
         autoindex on;
