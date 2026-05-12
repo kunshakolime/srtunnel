@@ -7,7 +7,7 @@
 # SSL Configuration
 # SKIP_SSL=y  -> HTTP mode, no SSL at all (overrides SSL_MODE)
 # SSL_MODE=3  -> Custom cert paths (only supported mode)
-SKIP_SSL="${SKIP_SSL:-n}"
+XRAY_SKIP_SSL="${SKIP_SSL:-y}"
 SSL_MODE="${SSL_MODE:-3}"
 SSL_CUSTOM_CERT="${SSL_CUSTOM_CERT:-/root/srtunnel/server.crt}"
 SSL_CUSTOM_KEY="${SSL_CUSTOM_KEY:-/root/srtunnel/server.key}"
