@@ -230,6 +230,11 @@ install_x-ui() {
     ${xui_folder}/x-ui setting -webBasePath "${webpath}" >/dev/null 2>&1
     ${xui_folder}/x-ui setting -username "${username}" >/dev/null 2>&1
     ${xui_folder}/x-ui setting -password "${password}" >/dev/null 2>&1
+    if [[ "$SKIP_SSL" == "y" || "$SKIP_SSL" == "Y" ]]; then
+        echo "setting listen port to 127.0.0.1"
+        /usr/local/x-ui/x-ui setting -listenIP "127.0.0.1"
+        return 0
+    fi
 
     systemctl start x-ui
     sleep 2
