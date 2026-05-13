@@ -233,7 +233,6 @@ install_x-ui() {
     if [[ "$SKIP_SSL" == "y" || "$SKIP_SSL" == "Y" ]]; then
         echo "setting listen port to 127.0.0.1"
         /usr/local/x-ui/x-ui setting -listenIP "127.0.0.1"
-        return 0
     fi
 
     systemctl start x-ui
