@@ -157,6 +157,7 @@ configure_ssl() {
     local webpath="$2"
 
     if [[ "$SKIP_SSL" == "y" || "$SKIP_SSL" == "Y" ]]; then
+        /usr/local/x-ui/x-ui setting -listenIP "127.0.0.1"
         echo "SKIP_SSL=y: running in HTTP mode"
         OUTPUT_ACCESS_URL="http://<server-ip>:${port}/${webpath}"
         OUTPUT_SSL_HOST=""
@@ -230,10 +231,6 @@ install_x-ui() {
     ${xui_folder}/x-ui setting -webBasePath "${webpath}" >/dev/null 2>&1
     ${xui_folder}/x-ui setting -username "${username}" >/dev/null 2>&1
     ${xui_folder}/x-ui setting -password "${password}" >/dev/null 2>&1
-    if [[ "$SKIP_SSL" == "y" || "$SKIP_SSL" == "Y" ]]; then
-        echo "setting listen port to 127.0.0.1"
-        /usr/local/x-ui/x-ui setting -listenIP "127.0.0.1"
-    fi
 
     systemctl start x-ui
     sleep 2
