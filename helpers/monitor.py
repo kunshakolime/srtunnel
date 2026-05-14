@@ -201,4 +201,34 @@ def user_traffic(username=None, uid=None):
         if uid is not None and entry["uid"] == uid:
             return entry
     return None
-    
+
+import threading
+
+_system_cache = {}
+
+def _background_sampler(iface, interval=2):
+    while True:
+        try:
+            info = system_info() or {}
+            bw   = bandwidth_usage(iface) or {}
+            _system_cache.update({
+                "ip":           public_ip(),
+                "cpu":          info.get("cpu"),
+                "ram_used":     info.get("ram_used"),
+                "ram_total":    info.get("ram_total"),
+                "ram_percent":  info.get("ram_percent"),
+                "disk_used":    info.get("disk_used"),
+                "disk_total":   info.get("disk_total"),
+                "disk_percent": info.get("disk_percent"),
+                "bandwidth":    bw,
+                "connections":  total_connections(),
+            })
+        except Exception as e:
+            logger.error("background_sampler: %s", e)
+
+def start_sampler(iface):
+    t = threading.Thread(target=_background_sampler, args=(iface,), daemon=True)
+    t.start()
+
+def get_system_cache():
+    return _system_cache.copy()
