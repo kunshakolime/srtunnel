@@ -57,6 +57,11 @@ def load_config():
 
 cfg = load_config()
 
+# ── Shared dependency ─────────────────────────────────────────────────────────
+# Using Annotated means FastAPI caches the dependency object — small but free win.
+
+CurrentUser = Annotated[str, Depends(get_current_user)]
+
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
@@ -85,6 +90,14 @@ core.init(cfg)
 dns.init(cfg)
 core.init_db()
 svc_helper.watcher.start()
+monitor.start_sampler(cfg["IFACE"])
+
+@app.get("/api/system")
+def system_info_endpoint(user: CurrentUser):
+    cache = monitor.get_system_cache()
+    if not cache:
+        raise HTTPException(status_code=503, detail="System stats not ready yet")
+    return cache
 
 app.add_middleware(
     CORSMiddleware,
@@ -152,13 +165,6 @@ def load_serverlist():
 
 def save_serverlist(data):
     SERVERLIST_FILE.write_text(json.dumps(data, indent=2))
-
-
-# ── Shared dependency ─────────────────────────────────────────────────────────
-# Using Annotated means FastAPI caches the dependency object — small but free win.
-
-CurrentUser = Annotated[str, Depends(get_current_user)]
-
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
