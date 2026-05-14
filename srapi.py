@@ -238,7 +238,7 @@ def login(data: LoginRequest):
         logger.warning("Failed login attempt for user: %s", data.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if data.username != "root":
-    raise HTTPException(status_code=403, detail="Only root is allowed")
+        raise HTTPException(status_code=403, detail="Only root is allowed")
     label = data.label or f"dashboard-{secrets.token_hex(4)}"
     token = create_token(data.username)
     store_token(token, data.username, label)
