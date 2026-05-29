@@ -15,7 +15,6 @@ ALL_SERVICES = {"ssh", "zivpn", "xray"}
 def init(config: dict):
     """Call this once at startup with the loaded config dict."""
     cfg.update(config)
-    xray.init(config)
 
 def _c(key, default=None):
     return cfg.get(key, default)
