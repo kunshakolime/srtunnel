@@ -100,5 +100,4 @@ def remove_user(tag, email):
     match = next((u for u in users if u.get("email") in (email, f"{email}@{tag}")), None)
     if not match:
         raise KeyError(f"user '{email}' not found in inbound '{tag}'")
-    return _post(f"panel/api/inbounds/{ib['id']}/delClient/{match['id']}")s
-        
+    return _post(f"panel/api/inbounds/{ib['id']}/delClient/{match['id']}")
