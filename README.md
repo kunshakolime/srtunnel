@@ -27,6 +27,5 @@ export TOKEN="your_telegram_token_here" \
 ```
 ```bash
 . <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/debinstall.sh)
-. <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh)
 ```
 
