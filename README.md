@@ -23,7 +23,7 @@ export TOKEN="your_telegram_token_here" \
        H1_PR="" \
        H2_PR="" \
        ZU_PR="" \
-       UC_PR="" \
+       UC_PR=""
 ```
 ```bash
 . <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/debinstall.sh)
