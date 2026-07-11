@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+requests
+httpx
+ruamel.yaml
+psutil
+PyYAML
+python-pam
+python-jose[cryptography]
+python-multipart
+certbot
