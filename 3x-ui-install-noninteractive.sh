@@ -13,8 +13,8 @@
 SSL_MODE="${SSL_MODE:-3}"                          # 1=Domain, 2=IP, 3=Custom paths
 SSL_DOMAIN="${SSL_DOMAIN:-}"                       # Domain for SSL (mode 1)
 SSL_IPV6="${SSL_IPV6:-}"                          # Optional IPv6 for IP cert (mode 2)
-SSL_CUSTOM_CERT="${SSL_CUSTOM_CERT:-/root/srtunnel/server.crt}"            # Custom cert path (mode 3)
-SSL_CUSTOM_KEY="${SSL_CUSTOM_KEY:-/root/srtunnel/server.key}"              # Custom key path (mode 3)
+SSL_CUSTOM_CERT="${SSL_CUSTOM_CERT:-/opt/srtunnel/server.crt}"            # Custom cert path (mode 3)
+SSL_CUSTOM_KEY="${SSL_CUSTOM_KEY:-/opt/srtunnel/server.key}"              # Custom key path (mode 3)
 SSL_CUSTOM_DOMAIN="${DOMAIN:-}"        # Domain for custom cert (mode 3)
 SSL_ACME_PORT="${SSL_ACME_PORT:-80}"              # Port for ACME challenge
 SSL_SET_PANEL="${SSL_SET_PANEL:-y}"               # Set cert for panel after issue (y/n)
