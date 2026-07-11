@@ -28,4 +28,15 @@ if [[ -d venv ]]; then
     source venv/bin/activate
 fi
 
+# Dev mode: stable secret key + auto-generated token
+export DEV=1
+
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from helpers.auth import create_token, store_token
+token = create_token('root')
+store_token(token, 'root', 'dev-token')
+print(f'Dev token: {token}')
+" 2>/dev/null || true
+
 exec python3 srapi.py
