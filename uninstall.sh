@@ -2,7 +2,7 @@
 # ── srtunnel Uninstall Script ─────────────────────────────────────────────────
 set -euo pipefail
 
-BOT_DIR="/root/srtunnel"
+BOT_DIR="/opt/srtunnel"
 
 confirm() {
     read -rp "$1 [y/N]: " ans

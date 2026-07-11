@@ -1,4 +1,4 @@
-#!/root/srtunnel/venv/bin/python
+#!/opt/srtunnel/venv/bin/python
 """
 Telegram VPN Management Bot — multi-server edition
 ====================================================

@@ -1,4 +1,4 @@
-#!/root/srtunnel/venv/bin/python
+#!/opt/srtunnel/venv/bin/python
 """
 WebSocket Tunnel Server
 Tunnels WebSocket/HTTP traffic to a backend service (SSH, etc.)

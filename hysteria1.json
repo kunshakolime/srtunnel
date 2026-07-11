@@ -1,8 +1,8 @@
 {
   "listen": ":5669",
   "protocol": "udp",
-  "cert": "/root/srtunnel/server.crt",
-  "key": "/root/srtunnel/server.key",
+  "cert": "/opt/srtunnel/server.crt",
+  "key": "/opt/srtunnel/server.key",
   "up_mbps": 100, 
   "down_mbps": 100,
   "auth": {

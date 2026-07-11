@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-BOT_DIR="/root/srtunnel"
+BOT_DIR="/opt/srtunnel"
 REPO="https://raw.githubusercontent.com/kunshakolime/srtunnel/main/"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -44,7 +44,7 @@ apt install -y -qq git openssh-server stunnel4 python3 python3-venv tmux gettext
 cd
 if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git
-    BOT_DIR="/root/srtunnel"
+    BOT_DIR="/opt/srtunnel"
 fi
 cd $BOT_DIR
 mv ./bin/deb13amd64/* ./
@@ -172,8 +172,8 @@ Description=srtunnel API
 After=network.target
 
 [Service]
-ExecStart=/root/srtunnel/srapi.py
-WorkingDirectory=/root/srtunnel
+ExecStart=/opt/srtunnel/srapi.py
+WorkingDirectory=/opt/srtunnel
 Restart=always
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/root
@@ -182,7 +182,7 @@ Environment=HOME=/root
 WantedBy=multi-user.target
 EOF
 
-ln -sf /root/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
+ln -sf /opt/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 systemctl daemon-reload

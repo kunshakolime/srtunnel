@@ -606,8 +606,8 @@ function clearTLSFields(uniqueId) {
   const key = document.getElementById('inboundKey-' + uniqueId);
   const alpn = document.getElementById('inboundALPN-' + uniqueId);
   if (sni) sni.value = '';
-  if (cert) cert.value = '/root/srtunnel/server.crt';
-  if (key) key.value = '/root/srtunnel/server.key';
+  if (cert) cert.value = '/opt/srtunnel/server.crt';
+  if (key) key.value = '/opt/srtunnel/server.key';
   if (alpn) alpn.value = 'h2, http/1.1';
 }
 
@@ -664,11 +664,11 @@ async function addXrayInbound() {
         </div>
         <div class="form-row">
           <label>Cert Path</label>
-          <input type="text" id="inboundCert-${uniqueId}" value="/root/srtunnel/server.crt" style="font-family:var(--font-mono)">
+          <input type="text" id="inboundCert-${uniqueId}" value="/opt/srtunnel/server.crt" style="font-family:var(--font-mono)">
         </div>
         <div class="form-row">
           <label>Key Path</label>
-          <input type="text" id="inboundKey-${uniqueId}" value="/root/srtunnel/server.key" style="font-family:var(--font-mono)">
+          <input type="text" id="inboundKey-${uniqueId}" value="/opt/srtunnel/server.key" style="font-family:var(--font-mono)">
         </div>
         <div class="form-row">
           <label>ALPN</label>
@@ -754,8 +754,8 @@ async function doAddInbound(modalId) {
     streamSettings.tlsSettings = {
       alpn: alpn ? alpn.split(',').map(x => x.trim()).filter(x => x) : ['h2', 'http/1.1'],
       certificates: [{
-        certificateFile: certPath || '/root/srtunnel/server.crt',
-        keyFile: keyPath || '/root/srtunnel/server.key'
+        certificateFile: certPath || '/opt/srtunnel/server.crt',
+        keyFile: keyPath || '/opt/srtunnel/server.key'
       }],
       minVersion: '1.2',
       maxVersion: '1.3'

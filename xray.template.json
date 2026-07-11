@@ -1,7 +1,7 @@
 {
   "log": {
-    "access": "/root/srtunnel/tmp/access.log",
-    "error": "/root/srtunnel/tmp/error.log",
+    "access": "/opt/srtunnel/tmp/access.log",
+    "error": "/opt/srtunnel/tmp/error.log",
     "loglevel": "warning"
   },
   "api": {
@@ -42,8 +42,8 @@
           ],
           "certificates": [
             {
-              "certificateFile": "/root/srtunnel/server.crt",
-              "keyFile": "/root/srtunnel/server.key"
+              "certificateFile": "/opt/srtunnel/server.crt",
+              "keyFile": "/opt/srtunnel/server.key"
             }
           ],
           "minVersion": "1.2",

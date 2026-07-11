@@ -1,4 +1,4 @@
-#!/root/srtunnel/venv/bin/python
+#!/opt/srtunnel/venv/bin/python
 
 
 import asyncio
@@ -196,5 +196,5 @@ async def main(config_path: str):
 
 if __name__ == "__main__":
     import sys
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "/root/srtunnel/config.yaml"
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "/opt/srtunnel/config.yaml"
     asyncio.run(main(config_path))
