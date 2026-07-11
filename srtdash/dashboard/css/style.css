@@ -329,6 +329,9 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 .svc-mode.active{background:var(--accent);color:#fff}
 .svc-mode:not(.active):hover{background:var(--bg4);color:var(--text2)}
 
+/* ── SERVICE TOOLBAR ── */
+.svc-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+
 /* ── MOBILE (portrait phones) ────────────────────────────────────────────── */
 @media (max-width: 480px) {
 
