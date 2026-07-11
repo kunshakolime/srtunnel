@@ -97,9 +97,15 @@ def _is_alive(name: str) -> bool:
     except (OSError, ValueError):
         return False
 
+LOG_DIR = Path("/tmp/srapi-services")
+
 def _start_session(s: Service):
     _tmux("kill-session", "-t", s.name)
-    cmd = ["tmux", "new-session", "-d", "-s", s.name, "bash", "-c", s.command]
+    LOG_DIR.mkdir(exist_ok=True)
+    log_file = LOG_DIR / f"{s.name}.log"
+    log_file.write_text("")  # clear old log
+    cmd = ["tmux", "new-session", "-d", "-s", s.name,
+           "bash", "-c", f"exec {s.command} >>{log_file} 2>&1; echo EXIT:$? >>{log_file}"]
     r = subprocess.run(
         cmd, cwd=str(CONFIG_FILE.parent),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -107,19 +113,11 @@ def _start_session(s: Service):
     if r.returncode != 0:
         logger.error("tmux new-session failed for %s: %s", s.name, r.stderr.strip())
         return
-    time.sleep(0.5)
-    # capture output while session may still exist
-    out = subprocess.run(
-        ["tmux", "capture-pane", "-t", f"{s.name}:0.0", "-p", "-S", "-20"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
-    if out.stdout.strip():
-        logger.info("Service %s output:\n%s", s.name, out.stdout.strip())
-    if out.returncode != 0:
-        logger.error("Service %s output capture failed: %s", s.name, out.stderr.strip())
-    # check if process is still alive
+    time.sleep(1)
+    if log_file.exists() and log_file.read_text().strip():
+        logger.info("Service %s output:\n%s", s.name, log_file.read_text().strip())
     if not _is_alive(s.name):
-        logger.error("Service %s session died immediately", s.name)
+        logger.error("Service %s died — see %s", s.name, log_file)
 
 def _stop_session(name: str):
     _tmux("kill-session", "-t", name)
@@ -149,14 +147,12 @@ def _reload_session(name: str):
     except Exception as e:
         return False, f"reload error: {e}"
 
-def _capture_pane(name: str, lines: int) -> List[str]:
-    p = subprocess.run(
-        ["tmux", "capture-pane", "-t", f"{name}:0.0", "-p", "-S", f"-{lines}"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-    )
-    if p.returncode != 0:
-        return []
-    return [l for l in p.stdout.splitlines() if l.strip()][-lines:]
+def _capture_log(name: str, lines: int) -> List[str]:
+    log_file = LOG_DIR / f"{name}.log"
+    if log_file.exists():
+        text = log_file.read_text()
+        return [l for l in text.splitlines() if l.strip()][-lines:]
+    return []
 
 # ── watcher ───────────────────────────────────────────────────────────────────
 
@@ -235,7 +231,7 @@ class _Watcher:
                 "name":    s.name,
                 "status":  s.status,
                 "running": s.running,
-                "log":     _capture_pane(s.name, lines) if s.running else [],
+                "log":     _capture_log(s.name, lines) if s.running else [],
             })
         return result
 
