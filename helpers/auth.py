@@ -1,11 +1,16 @@
-import os, pam, json
+import pam, json
 from pathlib import Path
 from jose import jwt, JWTError
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 
-SECRET_KEY = secrets.token_hex(32) if not os.environ.get("DEV") else "dev-secret-key-do-not-use-in-production"
+KEY_FILE = Path(__file__).resolve().parent / ".secret_key"
+if KEY_FILE.exists():
+    SECRET_KEY = KEY_FILE.read_text().strip()
+else:
+    SECRET_KEY = secrets.token_hex(32)
+    KEY_FILE.write_text(SECRET_KEY)
 ALGORITHM  = "HS256"
 
 TOKENS_FILE = Path(__file__).resolve().parent / "tokens.json"

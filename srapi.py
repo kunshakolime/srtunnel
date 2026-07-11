@@ -136,7 +136,7 @@ async def proxy_3xui(request: Request, path: str):
 
 # ── Dump directory listing ───────────────────────────────────────────────────
 
-DUMP_DIR = Path("/var/www/srtdash/dump")
+DUMP_DIR = BASE_DIR / "srtdash" / "dump"
 
 @app.get("/dump/")
 def dump_listing():
@@ -156,7 +156,7 @@ def dump_listing():
 
 # ── Static files (must be LAST — catches all unmatched routes) ──────────────
 
-STATIC_DIR = Path("/var/www/srtdash")
+STATIC_DIR = BASE_DIR / "srtdash"
 if STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
