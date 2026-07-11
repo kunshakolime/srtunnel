@@ -2,10 +2,13 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
+from pathlib import Path
 import logging, traceback
 
 from helpers import monitor, dns, speedtest as st, services as svc_helper
 from deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
+
+_BASE_DIR = Path(__file__).resolve().parent.parent
 
 logger = logging.getLogger("srapi.system")
 router = APIRouter(prefix="/api")
@@ -154,11 +157,10 @@ def get_serverlist_status(user: CurrentUser):
 # ── Backup / Restore ──────────────────────────────────────────────────────────
 
 from helpers import core
-from pathlib import Path
 
 @router.get("/backup")
 def backup_db(user: CurrentUser):
-    db = Path("/root/srtunnel/users.db")
+    db = _BASE_DIR / "users.db"
     if not db.exists():
         raise HTTPException(status_code=404, detail="Database not found")
     logger.info("DB backup downloaded by %s", user)
@@ -170,7 +172,7 @@ async def restore_db(file: UploadFile = File(...), user: CurrentUser = None):
     tmp = "/tmp/uploaded_users.db"
     with open(tmp, "wb") as f:
         f.write(await file.read())
-    shutil.copy(tmp, "/root/srtunnel/users.db")
+    shutil.copy(tmp, str(_BASE_DIR / "users.db"))
     os.remove(tmp)
     core.init_db()
     logger.info("DB restored by %s", user)

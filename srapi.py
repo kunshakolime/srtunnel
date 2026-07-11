@@ -1,9 +1,10 @@
-#!/root/srtunnel/venv/bin/python
+#!/usr/bin/env python3
 
 import sys, os
-sys.path.insert(0, "/root/srtunnel")
-
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR))
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -31,7 +32,7 @@ logger = logging.getLogger("srapi")
 
 def run_launch_commands():
     import subprocess
-    path = Path("/root/srtunnel/config.yaml")
+    path = BASE_DIR / "config.yaml"
     if not path.exists():
         return
     block = (yaml.safe_load(path.read_text()) or {}).get("manager", {})
@@ -162,8 +163,8 @@ if STATIC_DIR.is_dir():
 
 if __name__ == "__main__":
     import uvicorn
-    ssl_cert = os.environ.get("SSL_CERT", "/root/srtunnel/server.crt")
-    ssl_key  = os.environ.get("SSL_KEY",  "/root/srtunnel/server.key")
+    ssl_cert = os.environ.get("SSL_CERT", str(BASE_DIR / "server.crt"))
+    ssl_key  = os.environ.get("SSL_KEY",  str(BASE_DIR / "server.key"))
     kwargs = {}
     if os.path.isfile(ssl_cert) and os.path.isfile(ssl_key):
         kwargs["ssl_certfile"] = ssl_cert

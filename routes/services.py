@@ -6,6 +6,8 @@ import yaml, logging
 from helpers import services as svc_helper
 from deps import CurrentUser
 
+_BASE_DIR = Path(__file__).resolve().parent.parent
+
 logger = logging.getLogger("srapi.services")
 router = APIRouter(prefix="/api/services")
 
@@ -22,7 +24,7 @@ class ServiceStatusRequest(BaseModel):
 def list_services(lines: int = 10, user: CurrentUser = None):
     services = svc_helper.watcher.list_services(lines=lines) or []
     try:
-        raw      = yaml.safe_load(Path("/root/srtunnel/config.yaml").read_text()) or {}
+        raw      = yaml.safe_load((_BASE_DIR / "config.yaml").read_text()) or {}
         block    = raw.get("manager", {})
         keep_set   = set(block.get("keep",   []) or [])
         enable_set = set(block.get("enable", []) or [])
