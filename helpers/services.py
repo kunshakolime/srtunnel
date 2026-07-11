@@ -8,6 +8,7 @@ and restarts keep-alive services when they die.
 import subprocess
 import threading
 import time
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -18,6 +19,8 @@ from ruamel.yaml import YAML
 CONFIG_FILE        = Path(__file__).resolve().parent.parent / "config.yaml"
 TMUX_BLOCK         = "manager"
 KEEPALIVE_INTERVAL = 2   # seconds between keep-alive checks
+
+logger = logging.getLogger("srapi.services")
 
 # ── yaml ─────────────────────────────────────────────────────────────────────
 
@@ -79,10 +82,30 @@ def _active_sessions():
 
 def _start_session(s: Service):
     _tmux("kill-session", "-t", s.name)
-    subprocess.run(
-        ["tmux", "new-session", "-d", "-s", s.name, "bash", "-c", s.command],
-        cwd=str(CONFIG_FILE.parent)
+    cmd = ["tmux", "new-session", "-d", "-s", s.name, "bash", "-c", f"{s.command}; sleep 9999"]
+    r = subprocess.run(
+        cmd, cwd=str(CONFIG_FILE.parent),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
+    if r.returncode != 0:
+        logger.error("tmux new-session failed for %s: %s", s.name, r.stderr.strip())
+        return
+    time.sleep(0.5)
+    # check if process is still alive in the session
+    alive = subprocess.run(
+        ["tmux", "list-panes", "-t", s.name, "-F", "#{pane_pid}"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if alive.returncode != 0:
+        logger.error("Service %s session died immediately after start", s.name)
+        return
+    # capture first few lines of output for diagnostics
+    out = subprocess.run(
+        ["tmux", "capture-pane", "-t", f"{s.name}:0.0", "-p", "-S", "-20"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if out.stdout.strip():
+        logger.info("Service %s output:\n%s", s.name, out.stdout.strip())
 
 def _stop_session(name: str):
     _tmux("kill-session", "-t", name)
