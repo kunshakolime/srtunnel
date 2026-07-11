@@ -138,17 +138,19 @@
       <div class="section-header">
         <h3>Services</h3>
         <div class="hdr-actions">
-          <div class="svc-search-wrap">
-            <input type="text" id="svcSearch" class="svc-search" placeholder="Filter services…" oninput="filterServices()">
-            <button class="svc-search-x" onclick="document.getElementById('svcSearch').value='';filterServices()">×</button>
-          </div>
-          <div class="svc-mode-toggle" id="svcModeToggle">
-            <button class="svc-mode active" data-mode="tmux" onclick="switchSvcMode('tmux')">tmux</button>
-            <button class="svc-mode" data-mode="systemd" onclick="switchSvcMode('systemd')">systemd</button>
-          </div>
           <span id="watcher-badge" style="font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:6px;font-weight:600"></span>
           <button id="watcher-toggle-btn" class="btn-sm" onclick="toggleWatcher()">…</button>
           <button class="btn-sm" onclick="loadServices()">↺ Refresh</button>
+        </div>
+      </div>
+      <div class="svc-toolbar">
+        <div class="svc-mode-toggle" id="svcModeToggle">
+          <button class="svc-mode active" data-mode="tmux" onclick="switchSvcMode('tmux')">tmux</button>
+          <button class="svc-mode" data-mode="systemd" onclick="switchSvcMode('systemd')">systemd</button>
+        </div>
+        <div class="svc-search-wrap">
+          <input type="text" id="svcSearch" class="svc-search" placeholder="Filter services…" oninput="filterServices()">
+          <button class="svc-search-x" onclick="document.getElementById('svcSearch').value='';filterServices()">×</button>
         </div>
       </div>
       <div id="servicesList"></div>

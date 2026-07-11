@@ -110,6 +110,7 @@ async function loadServices() {
           </div>` : ''}
       </div>`;
   }).join('');
+  filterServices();
 }
 
 function toggleLog(name) {
@@ -189,6 +190,7 @@ async function loadSystemdUnits() {
   for (const name of _expandedLogs) {
     if (name.startsWith('sys-')) _fetchSystemdLog(name.slice(4));
   }
+  filterServices();
 }
 
 async function _fetchSystemdLog(name) {
