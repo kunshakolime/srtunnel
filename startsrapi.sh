@@ -28,15 +28,23 @@ if [[ -d venv ]]; then
     source venv/bin/activate
 fi
 
-# Dev mode: stable secret key + auto-generated token
+# Dev mode: stable secret key + persistent token
 export DEV=1
 
 python3 -c "
-import sys; sys.path.insert(0, '.')
-from helpers.auth import create_token, store_token
+import sys, json; sys.path.insert(0, '.')
+from pathlib import Path
+from helpers.auth import create_token, store_token, list_tokens
+
+TOKEN_FILE = Path('helpers/dev_token.json')
+existing = [t['token'] for t in list_tokens()]
 token = create_token('root')
-store_token(token, 'root', 'dev-token')
-print(f'Dev token: {token}')
+if token in existing:
+    print('Dev token already exists, skipping generation.')
+else:
+    store_token(token, 'root', 'dev-token')
+    TOKEN_FILE.write_text(json.dumps({'token': token}))
+    print(f'Dev token: {token}')
 " 2>/dev/null || true
 
 exec python3 srapi.py
