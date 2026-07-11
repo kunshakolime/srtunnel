@@ -110,7 +110,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
-from routes import auth, users, xray, files, services, system
+from routes import auth, users, xray, files, services, system, systemd
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -118,6 +118,7 @@ app.include_router(xray.router)
 app.include_router(files.router)
 app.include_router(services.router)
 app.include_router(system.router)
+app.include_router(systemd.router)
 
 
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────

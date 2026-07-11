@@ -13,10 +13,15 @@ function stopLogStream() {
 
 async function _tickLogStream() {
   if (document.hidden) return;
+  if (_svcMode === 'systemd') {
+    for (const key of _expandedLogs) {
+      if (key.startsWith('sys-')) _fetchSystemdLog(key.slice(4));
+    }
+    return;
+  }
   const res = await apiFetch(`/api/services?lines=${_svcLogLines}`).catch(() => null);
   if (!res?.ok) return;
   const d = await res.json();
-  // only update log panes that are currently expanded — don't re-render the whole list
   for (const s of (d.services || [])) {
     if (!_expandedLogs.has(s.name)) continue;
     const el = document.getElementById('log-' + s.name);
@@ -31,6 +36,7 @@ async function _tickLogStream() {
 let _svcLogLines = 20;
 let _expandedLogs = new Set();
 let _svcData = [];
+let _svcMode = 'tmux';
 
 async function loadServices() {
   const el = document.getElementById('servicesList');
@@ -113,6 +119,9 @@ function toggleLog(name) {
   const btn = document.getElementById('logbtn-' + name);
   if (el)  el.style.display = _expandedLogs.has(name) ? 'block' : 'none';
   if (btn) btn.textContent  = _expandedLogs.has(name) ? '▲ Hide Log' : '▼ Log';
+  if (_expandedLogs.has(name) && name.startsWith('sys-') && _svcMode === 'systemd') {
+    _fetchSystemdLog(name.slice(4));
+  }
 }
 
 function filterServices() {
@@ -124,6 +133,76 @@ function filterServices() {
     if (i >= _svcData.length) return;
     card.style.display = _svcData[i].name.toLowerCase().includes(q) ? '' : 'none';
   });
+}
+
+function switchSvcMode(mode) {
+  _svcMode = mode;
+  document.querySelectorAll('.svc-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  const watcherBadge = document.getElementById('watcher-badge');
+  const watcherBtn   = document.getElementById('watcher-toggle-btn');
+  if (mode === 'systemd') {
+    watcherBadge.style.display = 'none';
+    watcherBtn.style.display   = 'none';
+    loadSystemdUnits();
+  } else {
+    watcherBadge.style.display = '';
+    watcherBtn.style.display   = '';
+    loadServices();
+  }
+}
+
+async function loadSystemdUnits() {
+  const el = document.getElementById('servicesList');
+  el.innerHTML = '<p class="empty-state"><span class="spinner"></span></p>';
+  const res = await apiFetch('/api/systemd');
+  if (!res.ok) { el.innerHTML = '<p class="empty-state">Could not load systemd units</p>'; return; }
+  const d = await res.json();
+  const units = d.units || [];
+  _svcData = units.map(u => ({ name: u.name }));
+  stopLogStream();
+  el.innerHTML = units.map(u => {
+    const running = u.active === 'active';
+    const statusColor = running ? 'var(--green)' : u.active === 'failed' ? 'var(--red)' : 'var(--text3)';
+    return `
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <span style="font-size:9px;color:${running ? 'var(--green)' : 'var(--red)'}">${running ? '●' : '○'}</span>
+            <span style="font-weight:600;font-family:var(--font-mono);font-size:13px">${u.name}</span>
+            <span style="font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;background:${statusColor}1a;color:${statusColor};font-family:var(--font-mono)">${u.active}/${u.sub}</span>
+            <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${u.description}</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            ${running
+              ? `<button class="btn-sm" onclick="systemdAction('${u.name}','restart')">↺ Restart</button>
+                 <button class="btn-danger btn-icon" onclick="systemdAction('${u.name}','stop')">■ Stop</button>`
+              : `<button class="btn-green btn-sm" onclick="systemdAction('${u.name}','start')">▶ Start</button>`
+            }
+            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('sys-${u.name}')" id="logbtn-sys-${u.name}">▼ Log</button>
+          </div>
+        </div>
+        <div id="log-sys-${u.name}" style="display:none;margin-top:12px">
+          <pre style="background:var(--bg1);border-radius:8px;padding:12px;font-size:11px;font-family:var(--font-mono);color:var(--text2);overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;margin:0"></pre>
+        </div>
+      </div>`;
+  }).join('');
+  for (const name of _expandedLogs) {
+    if (name.startsWith('sys-')) _fetchSystemdLog(name.slice(4));
+  }
+}
+
+async function _fetchSystemdLog(name) {
+  const el = document.getElementById('log-sys-' + name);
+  if (!el) return;
+  const pre = el.querySelector('pre');
+  const res = await apiFetch(`/api/systemd/${name}/logs?lines=${_svcLogLines}`);
+  if (res.ok) { const d = await res.json(); pre.textContent = (d.log || []).join('\n') || '(no output)'; }
+}
+
+async function systemdAction(name, action) {
+  const res = await apiFetch(`/api/systemd/${name}/${action}`, { method: 'POST' });
+  if (res.ok) { toast(`${name}: ${action}`); loadSystemdUnits(); }
+  else { const d = await res.json(); toast(d.detail || 'Failed', 'err'); }
 }
 
 async function svcAction(name, action) {
