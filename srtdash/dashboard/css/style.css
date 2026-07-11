@@ -316,6 +316,19 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 .svc-search-x.visible{display:block}
 .svc-search-x:hover{color:var(--text1)}
 
+/* ── SERVICE MODE TOGGLE ── */
+.svc-mode-toggle{
+  display:inline-flex;border-radius:8px;overflow:hidden;
+  border:1px solid var(--border2);font-size:11px;font-family:var(--font-mono);
+}
+.svc-mode{
+  padding:5px 12px;border:none;cursor:pointer;
+  background:var(--bg3);color:var(--text3);font-size:11px;font-family:var(--font-mono);
+  font-weight:600;transition:all .15s;
+}
+.svc-mode.active{background:var(--accent);color:#fff}
+.svc-mode:not(.active):hover{background:var(--bg4);color:var(--text2)}
+
 /* ── MOBILE (portrait phones) ────────────────────────────────────────────── */
 @media (max-width: 480px) {
 
