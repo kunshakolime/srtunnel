@@ -299,6 +299,23 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
   .speed-results{grid-template-columns:1fr}
 }
 
+/* ── SERVICE SEARCH ── */
+.svc-search-wrap{position:relative;display:inline-flex;align-items:center}
+.svc-search{
+  background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+  padding:6px 28px 6px 10px;font-size:12px;font-family:var(--font-mono);
+  color:var(--text1);width:180px;outline:none;transition:border-color .2s;
+}
+.svc-search:focus{border-color:var(--accent)}
+.svc-search::placeholder{color:var(--text3)}
+.svc-search-x{
+  position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--text3);font-size:14px;
+  cursor:pointer;padding:2px 4px;line-height:1;display:none;
+}
+.svc-search-x.visible{display:block}
+.svc-search-x:hover{color:var(--text1)}
+
 /* ── MOBILE (portrait phones) ────────────────────────────────────────────── */
 @media (max-width: 480px) {
 

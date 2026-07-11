@@ -30,6 +30,7 @@ async function _tickLogStream() {
 
 let _svcLogLines = 20;
 let _expandedLogs = new Set();
+let _svcData = [];
 
 async function loadServices() {
   const el = document.getElementById('servicesList');
@@ -54,6 +55,7 @@ async function loadServices() {
   }
 
   const services = d.services || [];
+  _svcData = services;
   if (!services.length) { el.innerHTML = '<p class="empty-state">No services configured</p>'; return; }
 
   const logSel = `
@@ -111,6 +113,17 @@ function toggleLog(name) {
   const btn = document.getElementById('logbtn-' + name);
   if (el)  el.style.display = _expandedLogs.has(name) ? 'block' : 'none';
   if (btn) btn.textContent  = _expandedLogs.has(name) ? '▲ Hide Log' : '▼ Log';
+}
+
+function filterServices() {
+  const q = document.getElementById('svcSearch').value.toLowerCase();
+  const x = document.querySelector('.svc-search-x');
+  if (x) x.classList.toggle('visible', q.length > 0);
+  const cards = document.querySelectorAll('#servicesList .card');
+  cards.forEach((card, i) => {
+    if (i >= _svcData.length) return;
+    card.style.display = _svcData[i].name.toLowerCase().includes(q) ? '' : 'none';
+  });
 }
 
 async function svcAction(name, action) {
