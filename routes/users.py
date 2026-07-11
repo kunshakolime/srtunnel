@@ -96,14 +96,18 @@ def create_user(data: CreateUserRequest, user: CurrentUser):
         logger.info("Xray: using UUID=%s from DB", user_uuid)
         for tag in data.xray_inbounds:
             email = f"{data.username}@{tag}"
-            if any(u.get("email") == email for u in xray.list_users(tag)):
+            try:
+                existing = xray.list_users(tag)
+            except RuntimeError:
+                existing = []
+            if any(u.get("email") == email for u in existing):
                 xray_results.append({"tag": tag, "ok": True, "id": user_uuid})
                 continue
             try:
                 xray.add_user(tag, email, user_uuid=user_uuid)
                 xray_results.append({"tag": tag, "ok": True, "id": user_uuid})
                 logger.info("Xray user added: %s to %s", email, tag)
-            except (KeyError, http_requests.HTTPError) as e:
+            except (RuntimeError, KeyError, http_requests.HTTPError) as e:
                 xray_results.append({"tag": tag, "ok": False, "error": str(e)})
                 logger.warning("Xray user add failed: %s to %s — %s", email, tag, e)
 
@@ -134,13 +138,17 @@ def delete_user(username: str, user: CurrentUser):
 
     xray_results = []
     if "xray" in (u.get("services") or []):
-        for ib in xray.list_inbounds():
+        try:
+            inbounds = xray.list_inbounds()
+        except RuntimeError:
+            inbounds = []
+        for ib in inbounds:
             tag   = ib.get("tag")
             email = f"{username}@{tag}"
             try:
                 xray.remove_user(tag, email)
                 xray_results.append({"tag": tag, "ok": True})
-            except (KeyError, http_requests.HTTPError) as e:
+            except (RuntimeError, KeyError, http_requests.HTTPError) as e:
                 xray_results.append({"tag": tag, "ok": False, "error": str(e)})
             logger.info("delete_user xray: %s -> %s", email, xray_results[-1])
 
