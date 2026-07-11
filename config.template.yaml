@@ -109,6 +109,7 @@ stunnel:
       default_backend:
         - 127.0.0.1:7000
 xui_panel:
-  url: "http://127.0.0.1:51701/3x-ui/"
-  token: ""
+  url: "https://127.0.0.1:51701/3x-ui/"
+  username: "root"
+  password: "${XRAY_PASS}"
 
