@@ -16,7 +16,7 @@ users.db
 helpers/scope.json
 helpers/serverlist.json
 helpers/tokens.json
-helpers/dev_token.json
+helpers/.secret_key
 traffic_totals.json
 *.pid
 
