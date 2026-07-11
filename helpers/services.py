@@ -108,21 +108,18 @@ def _start_session(s: Service):
         logger.error("tmux new-session failed for %s: %s", s.name, r.stderr.strip())
         return
     time.sleep(0.5)
-    # check if process is still alive in the session
-    alive = subprocess.run(
-        ["tmux", "list-panes", "-t", s.name, "-F", "#{pane_pid}"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
-    if alive.returncode != 0 or not alive.stdout.strip():
-        logger.error("Service %s session died immediately after start", s.name)
-        return
-    # capture first few lines of output for diagnostics
+    # capture output while session may still exist
     out = subprocess.run(
         ["tmux", "capture-pane", "-t", f"{s.name}:0.0", "-p", "-S", "-20"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     if out.stdout.strip():
         logger.info("Service %s output:\n%s", s.name, out.stdout.strip())
+    if out.returncode != 0:
+        logger.error("Service %s output capture failed: %s", s.name, out.stderr.strip())
+    # check if process is still alive
+    if not _is_alive(s.name):
+        logger.error("Service %s session died immediately", s.name)
 
 def _stop_session(name: str):
     _tmux("kill-session", "-t", name)
