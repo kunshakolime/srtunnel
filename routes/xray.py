@@ -22,7 +22,10 @@ class XrayUserRequest(BaseModel):
 
 @router.get("/inbounds")
 def list_xray_inbounds(user: CurrentUser):
-    return xray.list_inbounds()
+    try:
+        return xray.list_inbounds()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/inbounds")
 def add_xray_inbound(inbound: dict = Body(...), user: CurrentUser = None):
