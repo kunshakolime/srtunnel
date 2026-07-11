@@ -57,7 +57,7 @@ fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.
 # ── Python Venv ───────────────────────────────────────────────────────────────
 echo "Setting up Python venv..."
 [ -d venv ] || python3 -m venv venv
-$BOT_DIR/venv/bin/pip install --upgrade pip && $BOT_DIR/venv/bin/pip install python-telegram-bot ruamel.yaml psutil PyYAML certbot aiohttp fastapi uvicorn python-pam python-jose[cryptography] python-multipart
+$BOT_DIR/venv/bin/pip install --upgrade pip && $BOT_DIR/venv/bin/pip install python-telegram-bot ruamel.yaml psutil PyYAML certbot aiohttp fastapi uvicorn python-pam python-jose[cryptography] python-multipart httpx
 #for api: fastapi uvicorn python-pam python-jose[cryptography] python-multipart
 
 
@@ -100,19 +100,9 @@ SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd.$DOMAIN}"
 export IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE XRAY_PASS
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
-# ── Setup Nginx ─────────────────────────────────────────────────────────────
-envsubst '$DOMAIN' < srtdash.template > /etc/nginx/sites-available/srtdash
-
 envsubst '$DOMAIN' < xray.template.json > xray.json
 
-
-ln -sf /etc/nginx/sites-available/srtdash /etc/nginx/sites-enabled/srtdash
-rm -f /etc/nginx/sites-enabled/default
-
-
 cp -r ./srtdash /var/www/srtdash
-chown -R www-data:www-data /var/www/srtdash
-chmod -R 755 /var/www/srtdash
 
 # Create stream-enabled directory
 mkdir -p /etc/nginx/stream-enabled

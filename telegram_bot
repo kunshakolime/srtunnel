@@ -48,7 +48,7 @@ def load_config() -> dict:
     bot = raw.get("telegram_bot", {})
     return {
         "TOKEN":       bot.get("token"),
-        "PRIMARY_URL": bot.get("primary_url", "http://127.0.0.1:51700"),
+        "PRIMARY_URL": bot.get("primary_url", "https://127.0.0.1:8444"),
     }
 
 cfg         = load_config()
@@ -137,7 +137,7 @@ async def _req(method: str, server: dict, path: str, **kwargs):
     url     = server["url"].rstrip("/") + path
     headers = {"Authorization": f"Bearer {server['token']}"}
     timeout = aiohttp.ClientTimeout(total=60)
-    async with aiohttp.ClientSession(timeout=timeout) as sess:
+    async with aiohttp.ClientSession(timeout=timeout, connector=aiohttp.TCPConnector(ssl=False)) as sess:
         async with sess.request(method, url, headers=headers, **kwargs) as r:
             if r.content_type and "octet-stream" in r.content_type:
                 return await r.read()
@@ -1089,7 +1089,7 @@ async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  #
         await q.edit_message_text(
             "*➕ Add Server*\n\n"
             "Send: `id name url token`\n\n"
-            "Example:\n`vps2 Germany http://1.2.3.4:51700 mytoken`\n\n/cancel to go back",
+            "Example:\n`vps2 Germany https://1.2.3.4:8444 mytoken`\n\n/cancel to go back",
             parse_mode="Markdown", reply_markup=kb_srvlist())
 
     elif data == "slst_remove":
