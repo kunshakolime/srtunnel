@@ -28,7 +28,7 @@ def list_xray_inbounds(user: CurrentUser):
 def add_xray_inbound(inbound: dict = Body(...), user: CurrentUser = None):
     try:
         xray.add_inbound(inbound)
-    except (KeyError, http_requests.HTTPError) as e:
+    except (RuntimeError, KeyError, http_requests.HTTPError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "added", "tag": inbound.get("tag")}
 
@@ -36,7 +36,7 @@ def add_xray_inbound(inbound: dict = Body(...), user: CurrentUser = None):
 def remove_xray_inbound(tag: str, user: CurrentUser):
     try:
         xray.remove_inbound(tag)
-    except (KeyError, http_requests.HTTPError) as e:
+    except (RuntimeError, KeyError, http_requests.HTTPError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "removed", "tag": tag}
 
@@ -44,14 +44,14 @@ def remove_xray_inbound(tag: str, user: CurrentUser):
 def list_xray_inbound_users(tag: str, user: CurrentUser):
     try:
         return xray.list_users(tag)
-    except KeyError as e:
+    except (RuntimeError, KeyError) as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.post("/inbounds/{tag}/users")
 def add_xray_inbound_user(tag: str, data: XrayUserRequest, user: CurrentUser):
     try:
         xray.add_user(tag, data.username, user_uuid=data.uid)
-    except (KeyError, http_requests.HTTPError) as e:
+    except (RuntimeError, KeyError, http_requests.HTTPError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"tag": tag, "username": data.username}
 
@@ -59,7 +59,7 @@ def add_xray_inbound_user(tag: str, data: XrayUserRequest, user: CurrentUser):
 def remove_xray_inbound_user(tag: str, email: str, user: CurrentUser):
     try:
         xray.remove_user(tag, email)
-    except (KeyError, http_requests.HTTPError) as e:
+    except (RuntimeError, KeyError, http_requests.HTTPError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"tag": tag, "email": email}
 

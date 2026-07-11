@@ -50,9 +50,16 @@ def _post(path, **kwargs):
 
 # ── Inbounds ─────────────────────────────────────────────────────────────────
 
+# ── Public API (clean errors) ───────────────────────────────────────────────
+
 def list_inbounds():
-    data = _get("panel/api/inbounds/list")
-    return data.get("obj", [])
+    try:
+        data = _get("panel/api/inbounds/list")
+        return data.get("obj", [])
+    except RuntimeError as e:
+        raise RuntimeError(f"Not configured: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Xray backend not responding: {e}")
 
 def _inbound_by_tag(tag):
     match = next((ib for ib in list_inbounds() if ib.get("tag") == tag), None)
@@ -61,22 +68,30 @@ def _inbound_by_tag(tag):
     return match
 
 def add_inbound(cfg):
-    return _post("panel/api/inbounds/add", json={
-        **{k: cfg.get(k, default) for k, default in [
-            ("up", 0), ("down", 0), ("total", 0), ("remark", ""),
-            ("enable", True), ("expiryTime", 0), ("listen", ""),
-            ("port", None), ("protocol", None),
-        ]},
-        "settings":       json.dumps(cfg.get("settings", {})),
-        "streamSettings": json.dumps(cfg.get("streamSettings", {})),
-        "sniffing":       json.dumps(cfg.get("sniffing", {})),
-    })
+    try:
+        return _post("panel/api/inbounds/add", json={
+            **{k: cfg.get(k, default) for k, default in [
+                ("up", 0), ("down", 0), ("total", 0), ("remark", ""),
+                ("enable", True), ("expiryTime", 0), ("listen", ""),
+                ("port", None), ("protocol", None),
+            ]},
+            "settings":       json.dumps(cfg.get("settings", {})),
+            "streamSettings": json.dumps(cfg.get("streamSettings", {})),
+            "sniffing":       json.dumps(cfg.get("sniffing", {})),
+        })
+    except RuntimeError as e:
+        raise RuntimeError(f"Not configured: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Xray backend not responding: {e}")
 
 def remove_inbound(tag):
     ib = _inbound_by_tag(tag)
-    return _post(f"panel/api/inbounds/del/{ib['id']}")
-
-# ── Users ─────────────────────────────────────────────────────────────────────
+    try:
+        return _post(f"panel/api/inbounds/del/{ib['id']}")
+    except RuntimeError as e:
+        raise RuntimeError(f"Not configured: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Xray backend not responding: {e}")
 
 def _inbound_users(inbound_id):
     for ib in list_inbounds():
@@ -88,20 +103,30 @@ def _inbound_users(inbound_id):
     return []
 
 def list_users(tag):
-    return _inbound_users(_inbound_by_tag(tag)["id"])
+    try:
+        return _inbound_users(_inbound_by_tag(tag)["id"])
+    except RuntimeError as e:
+        raise RuntimeError(f"Not configured: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Xray backend not responding: {e}")
 
 def add_user(tag, email, user_uuid=None, limit_ip=0, total_gb=0, expiry_time=0):
     ib = _inbound_by_tag(tag)
-    return _post("panel/api/inbounds/addClient", data={
-        "id": ib["id"],
-        "settings": json.dumps({"clients": [{
-            "id": user_uuid or str(uuid.uuid4()),
-            "flow": "", "email": email,
-            "limitIp": limit_ip, "totalGB": total_gb,
-            "expiryTime": expiry_time, "enable": True,
-            "tgId": "", "subId": "", "comment": "", "reset": 0,
-        }]}),
-    })
+    try:
+        return _post("panel/api/inbounds/addClient", data={
+            "id": ib["id"],
+            "settings": json.dumps({"clients": [{
+                "id": user_uuid or str(uuid.uuid4()),
+                "flow": "", "email": email,
+                "limitIp": limit_ip, "totalGB": total_gb,
+                "expiryTime": expiry_time, "enable": True,
+                "tgId": "", "subId": "", "comment": "", "reset": 0,
+            }]}),
+        })
+    except RuntimeError as e:
+        raise RuntimeError(f"Not configured: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Xray backend not responding: {e}")
 
 def remove_user(tag, email):
     ib = _inbound_by_tag(tag)
@@ -109,4 +134,9 @@ def remove_user(tag, email):
     match = next((u for u in users if u.get("email") in (email, f"{email}@{tag}")), None)
     if not match:
         raise KeyError(f"user '{email}' not found in inbound '{tag}'")
-    return _post(f"panel/api/inbounds/{ib['id']}/delClient/{match['id']}")
+    try:
+        return _post(f"panel/api/inbounds/{ib['id']}/delClient/{match['id']}")
+    except RuntimeError as e:
+        raise RuntimeError(f"Not configured: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Xray backend not responding: {e}")
