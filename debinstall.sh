@@ -2,6 +2,13 @@
 
 BOT_DIR="/root/srtunnel"
 REPO="https://raw.githubusercontent.com/kunshakolime/srtunnel/main/"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# If run from inside a cloned repo, use that instead of cloning again
+if [[ -f "$SCRIPT_DIR/config.template.yaml" && -f "$SCRIPT_DIR/srapi.py" ]]; then
+    BOT_DIR="$SCRIPT_DIR"
+    echo "Detected existing repo at $BOT_DIR — skipping clone."
+fi
 SSH_DEF="22"
 H1_DEF="1000:2999"
 H2_DEF="3000:5999"
@@ -35,7 +42,10 @@ apt install -y -qq speedtest
 apt install -y -qq git openssh-server stunnel4 python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables libpam0g-dev nginx libnginx-mod-stream
 
 cd
-git clone https://github.com/kunshakolime/srtunnel.git
+if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
+    git clone https://github.com/kunshakolime/srtunnel.git
+    BOT_DIR="/root/srtunnel"
+fi
 cd $BOT_DIR
 mv ./bin/deb13amd64/* ./
 rm -rf ./bin/
