@@ -14,29 +14,36 @@ from urllib.parse import urljoin
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Config (lazy — only connects when xui_panel is configured) ───────────────
 
-def _load_config():
+_cfg = None
+_SESSION = None
+_BASE = None
+
+def _ensure_config():
+    global _cfg, _SESSION, _BASE
+    if _cfg is not None:
+        return
     raw = yaml.safe_load(open(_BASE_DIR / "config.yaml")) or {}
-    cfg = raw.get("xui_panel") or {}
-    if not cfg.get("url") or not cfg.get("token"):
+    panel = raw.get("xui_panel") or {}
+    if not panel.get("url") or not panel.get("token"):
         raise RuntimeError("xui_panel.url and xui_panel.token are required in config.yaml")
-    return cfg
-
-_cfg = _load_config()
-_BASE = _cfg["url"].rstrip("/") + "/"
-_SESSION = requests.Session()
-_SESSION.verify = False
-_SESSION.headers["Authorization"] = f"Bearer {_cfg['token']}"
+    _cfg = panel
+    _BASE = _cfg["url"].rstrip("/") + "/"
+    _SESSION = requests.Session()
+    _SESSION.verify = False
+    _SESSION.headers["Authorization"] = f"Bearer {_cfg['token']}"
 
 # ── Core HTTP ────────────────────────────────────────────────────────────────
 
 def _get(path):
+    _ensure_config()
     r = _SESSION.get(urljoin(_BASE, path))
     r.raise_for_status()
     return r.json()
 
 def _post(path, **kwargs):
+    _ensure_config()
     r = _SESSION.post(urljoin(_BASE, path), **kwargs)
     r.raise_for_status()
     return r.json()
