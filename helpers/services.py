@@ -80,9 +80,26 @@ def _active_sessions():
     )
     return set(p.stdout.splitlines()) if p.returncode == 0 else set()
 
+def _is_alive(name: str) -> bool:
+    """Check if a tmux session has a live pane (not just an exited shell)."""
+    p = subprocess.run(
+        ["tmux", "list-panes", "-t", name, "-F", "#{pane_pid}"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+    )
+    if p.returncode != 0 or not p.stdout.strip():
+        return False
+    pid = p.stdout.strip().splitlines()[0]
+    # check if the pane's child process is still running
+    try:
+        import os, signal
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
 def _start_session(s: Service):
     _tmux("kill-session", "-t", s.name)
-    cmd = ["tmux", "new-session", "-d", "-s", s.name, "bash", "-c", f"{s.command}; sleep 9999"]
+    cmd = ["tmux", "new-session", "-d", "-s", s.name, "bash", "-c", s.command]
     r = subprocess.run(
         cmd, cwd=str(CONFIG_FILE.parent),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -96,7 +113,7 @@ def _start_session(s: Service):
         ["tmux", "list-panes", "-t", s.name, "-F", "#{pane_pid}"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
-    if alive.returncode != 0:
+    if alive.returncode != 0 or not alive.stdout.strip():
         logger.error("Service %s session died immediately after start", s.name)
         return
     # capture first few lines of output for diagnostics
@@ -161,10 +178,9 @@ class _Watcher:
             self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0
 
     def _sync_running(self):
-        active = _active_sessions()
         with self._lock:
             for s in self._services:
-                s.running = s.name in active
+                s.running = _is_alive(s.name)
 
     def _loop(self):
         # on start: launch enabled services that aren't running yet
