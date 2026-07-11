@@ -15,7 +15,7 @@ from ruamel.yaml import YAML
 
 # ── constants ────────────────────────────────────────────────────────────────
 
-CONFIG_FILE        = Path("/root/srtunnel/config.yaml")
+CONFIG_FILE        = Path(__file__).resolve().parent.parent / "config.yaml"
 TMUX_BLOCK         = "manager"
 KEEPALIVE_INTERVAL = 2   # seconds between keep-alive checks
 
@@ -270,7 +270,7 @@ watcher = _Watcher()
 import json
 import urllib.request
 
-SERVERLIST_FILE    = Path("/root/srtunnel/helpers/serverlist.json")
+SERVERLIST_FILE    = Path(__file__).resolve().parent / "serverlist.json"
 SERVER_CHECK_INTERVAL = 30   # seconds
 
 def _load_serverlist():

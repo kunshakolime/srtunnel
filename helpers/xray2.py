@@ -1,5 +1,7 @@
 import sys
-sys.path.insert(0, "/root/srtunnel")
+from pathlib import Path
+_BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_BASE_DIR))
 
 import json
 import logging
@@ -15,7 +17,7 @@ logger = logging.getLogger(__name__)
 # ── Config ───────────────────────────────────────────────────────────────────
 
 def _load_config():
-    raw = yaml.safe_load(open("/root/srtunnel/config.yaml")) or {}
+    raw = yaml.safe_load(open(_BASE_DIR / "config.yaml")) or {}
     cfg = raw.get("xui_panel") or {}
     if not cfg.get("url") or not cfg.get("token"):
         raise RuntimeError("xui_panel.url and xui_panel.token are required in config.yaml")

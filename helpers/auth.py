@@ -8,7 +8,7 @@ import secrets
 SECRET_KEY = secrets.token_hex(32)
 ALGORITHM  = "HS256"
 
-TOKENS_FILE = Path("/root/srtunnel/helpers/tokens.json")
+TOKENS_FILE = Path(__file__).resolve().parent / "tokens.json"
 
 security = HTTPBearer()
 

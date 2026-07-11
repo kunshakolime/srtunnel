@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _ip_cache = {"ip": None, "ts": 0}
 
-TRAFFIC_CACHE     = Path("/root/srtunnel/traffic_totals.json")
+TRAFFIC_CACHE     = Path(__file__).resolve().parent.parent / "traffic_totals.json"
 ROTATE_THRESHOLD  = 100_000  # lines per file before rotating
 
 
