@@ -67,7 +67,7 @@ fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.
 # ── Python Venv ───────────────────────────────────────────────────────────────
 echo "Setting up Python venv..."
 [ -d venv ] || python3 -m venv venv
-$BOT_DIR/venv/bin/pip install --upgrade pip && $BOT_DIR/venv/bin/pip install -r requirements.txt
+$BOT_DIR/venv/bin/pip install --upgrade pip -r requirements.txt
 
 
 ln -sf "$BOT_DIR/srtunnel" /usr/sbin/srtunnel
