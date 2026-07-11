@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Secrets & certs
+server.crt
+server.key
+slowdns.key
+slowdns.pub
+config.yaml
+.env
+
+# Runtime data
+users.db
+helpers/scope.json
+helpers/serverlist.json
+traffic_totals.json
+*.pid
+
+# Logs
+*.log
+
+# Temp
+tmp/

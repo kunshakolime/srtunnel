@@ -5,7 +5,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq
 from helpers.services import watcher
 
-BASE_DIR, API_URL = Path(__file__).resolve().parent, "http://127.0.0.1:51700"
+BASE_DIR, API_URL = Path(__file__).resolve().parent, "https://127.0.0.1:8444"
 CONFIG_FILE = BASE_DIR / "config.yaml"
 yaml_rt = YAML()
 yaml_rt.preserve_quotes, yaml_rt.width, yaml_rt.explicit_start = True, 4096, False
@@ -25,8 +25,11 @@ def update_config_status(name, new_status):
 
 def check_api():
     try:
-        import urllib.request
-        return urllib.request.urlopen(f"{API_URL}/api/health", timeout=1).status == 200
+        import urllib.request, ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return urllib.request.urlopen(f"{API_URL}/api/health", timeout=1, context=ctx).status == 200
     except: return False
 
 class Manager:

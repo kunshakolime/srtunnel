@@ -70,8 +70,6 @@ fi
 echo ""
 echo "[5/8] Reverting Nginx configuration..."
 
-rm -f /etc/nginx/sites-enabled/srtdash
-rm -f /etc/nginx/sites-available/srtdash
 rm -f /etc/nginx/stream-enabled/srtdash
 rmdir --ignore-fail-on-non-empty /etc/nginx/stream-enabled 2>/dev/null || true
 
@@ -79,12 +77,6 @@ rmdir --ignore-fail-on-non-empty /etc/nginx/stream-enabled 2>/dev/null || true
 if grep -q 'include /etc/nginx/stream-enabled' /etc/nginx/nginx.conf 2>/dev/null; then
     sed -i '/^stream {/,/^}/d' /etc/nginx/nginx.conf
     echo "  Removed stream block from nginx.conf."
-fi
-
-# Restore the default site if it was removed
-if [[ -f /etc/nginx/sites-available/default && ! -e /etc/nginx/sites-enabled/default ]]; then
-    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
-    echo "  Re-enabled default nginx site."
 fi
 
 # Remove srtdash web root
