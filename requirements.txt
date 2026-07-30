@@ -9,3 +9,4 @@ python-pam
 python-jose[cryptography]
 python-multipart
 certbot
+websockets
