@@ -129,11 +129,24 @@ app.include_router(systemd.router)
 
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────
 
+_XUI_PANEL_CFG = None
+
+def _get_xui_cfg():
+    global _XUI_PANEL_CFG
+    if _XUI_PANEL_CFG is None:
+        raw = (yaml.safe_load((BASE_DIR / "config.yaml").read_text()) or {})
+        _XUI_PANEL_CFG = raw.get("xui_panel") or {}
+    return _XUI_PANEL_CFG
+
 @app.api_route("/3x-ui/{path:path}", methods=["GET","POST","PUT","DELETE","PATCH","OPTIONS","HEAD"])
 async def proxy_3xui(request: Request, path: str):
-    target = f"http://127.0.0.1:57001/3x-ui/{path}"
+    panel = _get_xui_cfg()
+    base = panel.get("url", "http://127.0.0.1:57001/3x-ui/").rstrip("/")
+    target = f"{base}/{path}"
     body = await request.body()
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")}
+    if panel.get("token"):
+        headers["Authorization"] = f"Bearer {panel['token']}"
     async with httpx.AsyncClient(verify=False) as client:
         resp = await client.request(request.method, target, headers=headers, content=body, timeout=30)
     ct = resp.headers.get("content-type", "text/html")

@@ -109,6 +109,6 @@ stunnel:
       default_backend:
         - 127.0.0.1:7000
 xui_panel:
-  url: "https://127.0.0.1:57001/3x-ui/"
+  url: "http://127.0.0.1:57001/3x-ui/"
   token: "${DASH_PASS}"
 
