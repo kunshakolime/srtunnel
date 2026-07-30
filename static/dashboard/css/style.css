@@ -159,6 +159,7 @@ button,input[type=button]{cursor:pointer;border:none;border-radius:8px;padding:8
 .btn{background:var(--accent);color:#fff;font-weight:500}
 .btn:hover{background:var(--accent2)}
 .btn-sm{background:var(--bg4);color:var(--text1);border:1px solid var(--border2)}
+button.btn-sm{display:inline-flex;align-items:center;justify-content:center}
 .btn-sm:hover{background:var(--bg5);border-color:var(--border2)}
 .btn-danger{background:rgba(240,64,96,.15);color:var(--red);border:1px solid rgba(240,64,96,.2)}
 .btn-danger:hover{background:rgba(240,64,96,.25)}
