@@ -46,17 +46,23 @@ def run_launch_commands():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("srapi starting up")
-    run_launch_commands()
+    try:
+        core.init(cfg)
+        dns.init(cfg)
+        core.init_db()
+        svc_helper.watcher.start()
+        svc_helper.start_server_monitor()
+        monitor.start_sampler(cfg.get("IFACE", "eth0"))
+        run_launch_commands()
+    except Exception as e:
+        logger.critical("startup failed: %s — %s", type(e).__name__, e)
+        logger.critical(traceback.format_exc())
+        raise
     yield
     logger.info("srapi shutting down")
+    svc_helper.watcher.stop()
 
 app = FastAPI(lifespan=lifespan)
-
-core.init(cfg)
-dns.init(cfg)
-core.init_db()
-svc_helper.watcher.start()
-monitor.start_sampler(cfg["IFACE"])
 
 
 # ── Middleware ────────────────────────────────────────────────────────────────

@@ -170,10 +170,10 @@ Description=srtunnel API
 After=network.target
 
 [Service]
-ExecStart=/opt/srtunnel/srapi.py
+ExecStart=/opt/srtunnel/venv/bin/python /opt/srtunnel/srapi.py
 WorkingDirectory=/opt/srtunnel
 Restart=always
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/opt/srtunnel/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/root
 
 [Install]
