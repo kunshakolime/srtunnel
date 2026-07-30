@@ -332,6 +332,21 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 /* ── SERVICE TOOLBAR ── */
 .svc-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 
+/* ── SERVICE CARD ── */
+.svc-card{background:var(--bg3);border-radius:14px;border:1px solid var(--border);padding:18px;margin-bottom:10px}
+.svc-card-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.svc-card-left{display:flex;align-items:center;gap:10px;min-width:0}
+.svc-card-right{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.svc-dot{font-size:9px}
+.svc-name{font-weight:600;font-family:var(--font-mono);font-size:13px}
+.svc-badge{font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;font-family:var(--font-mono)}
+.svc-log-wrap{margin-top:12px}
+.svc-log-wrap pre{background:var(--bg1);border-radius:8px;padding:12px;font-size:11px;font-family:var(--font-mono);color:var(--text2);overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;margin:0}
+.svc-log-lines{display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12px;color:var(--text3)}
+.svc-log-lines .lbl{flex-shrink:0}
+.svc-lines-btn{padding:3px 10px;font-size:11px}
+.svc-lines-btn.active{background:var(--accent);color:#fff}
+
 /* ── MOBILE (portrait phones) ────────────────────────────────────────────── */
 @media (max-width: 480px) {
 
@@ -380,4 +395,30 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
   .modal-box { padding: 20px 16px; border-radius: 14px; }
 
   /* scope grid already goes 1-col at 600px */
+
+  /* ── SERVICES (mobile) ── */
+  .svc-toolbar { gap: 6px; }
+  .svc-mode-toggle { font-size: 10px; }
+  .svc-mode { padding: 4px 8px; font-size: 10px; }
+  .svc-search { width: 120px; font-size: 11px; padding: 5px 24px 5px 8px; }
+
+  .svc-card { padding: 12px; }
+  .svc-card-header { flex-direction: column; align-items: stretch; gap: 6px; }
+  .svc-card-left { gap: 6px; }
+  .svc-name { font-size: 12px; }
+  .svc-badge { font-size: 9px; padding: 1px 6px; }
+  .svc-card-right { gap: 4px; }
+
+  .svc-card-right .btn-sm,
+  .svc-card-right select { font-size: 10px; padding: 4px 7px; }
+  .svc-card-right .btn-icon { padding: 4px 6px; font-size: 10px; }
+
+  .svc-log-lines { gap: 4px; font-size: 11px; margin-bottom: 10px; flex-wrap: wrap; }
+  .svc-lines-btn { padding: 2px 7px; font-size: 10px; }
+  .svc-log-wrap pre { padding: 8px; font-size: 10px; max-height: 160px; }
+
+  .section-header h3 { font-size: 14px; }
+  .section-header { flex-wrap: wrap; gap: 8px; }
+  #watcher-badge { font-size: 10px !important; padding: 3px 8px !important; }
+  #watcher-toggle-btn { font-size: 10px; padding: 4px 10px; }
 }

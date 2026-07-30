@@ -65,10 +65,10 @@ async function loadServices() {
   if (!services.length) { el.innerHTML = '<p class="empty-state">No services configured</p>'; return; }
 
   const logSel = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12px;color:var(--text3)">
-      Log lines:
+    <div class="svc-log-lines">
+      <span class="lbl">Lines:</span>
       ${[10,20,50,100].map(n => `
-        <button class="btn-sm${_svcLogLines===n?' btn':''}" style="padding:3px 10px;font-size:11px"
+        <button class="btn-sm svc-lines-btn${_svcLogLines===n?' active':''}"
           onclick="_svcLogLines=${n};loadServices()">${n}</button>
       `).join('')}
     </div>`;
@@ -81,14 +81,14 @@ async function loadServices() {
     const logLines = (s.log || []).join('\n') || '(no output)';
 
     return `
-      <div class="card" style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:9px;color:${s.running ? 'var(--green)' : 'var(--red)'}">${s.running ? '●' : '○'}</span>
-            <span style="font-weight:600;font-family:var(--font-mono);font-size:13px">${s.name}</span>
-            <span style="font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;background:${statusColor}1a;color:${statusColor};font-family:var(--font-mono)">${statusLabel}</span>
+      <div class="svc-card">
+        <div class="svc-card-header">
+          <div class="svc-card-left">
+            <span class="svc-dot" style="color:${s.running ? 'var(--green)' : 'var(--red)'}">${s.running ? '●' : '○'}</span>
+            <span class="svc-name">${s.name}</span>
+            <span class="svc-badge" style="background:${statusColor}1a;color:${statusColor}">${statusLabel}</span>
           </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <div class="svc-card-right">
             ${s.running
               ? `<button class="btn-sm" onclick="svcAction('${s.name}','reload')">⟲ Reload</button>
                  <button class="btn-sm" onclick="svcAction('${s.name}','restart')">↺ Restart</button>
@@ -97,15 +97,15 @@ async function loadServices() {
             }
             <select class="btn-sm" style="padding:5px 8px;font-size:11px;font-family:var(--font-mono)"
               onchange="setSvcStatus('${s.name}',this.value)">
-              <option value="keep"    ${s.status==='keep'   ?'selected':''}>keep-alive</option>
-              <option value="enable"  ${s.status==='enable' ?'selected':''}>run once</option>
-              <option value="disable" ${s.status==='disable'?'selected':''}>disabled</option>
+              <option value="keep"    ${s.status==='keep'   ?'selected':''}>keep</option>
+              <option value="enable"  ${s.status==='enable' ?'selected':''}>once</option>
+              <option value="disable" ${s.status==='disable'?'selected':''}>off</option>
             </select>
-            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('${s.name}')" id="logbtn-${s.name}">${logOpen ? '▲ Hide Log' : '▼ Log'}</button>
+            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('${s.name}')" id="logbtn-${s.name}">${logOpen ? '▲' : '▼'}</button>
           </div>
         </div>
-          <div id="log-${s.name}" style="display:${logOpen ? 'block' : 'none'};margin-top:12px">
-            <pre style="background:var(--bg1);border-radius:8px;padding:12px;font-size:11px;font-family:var(--font-mono);color:var(--text2);overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;margin:0">${escHtml(logLines)}</pre>
+          <div class="svc-log-wrap" id="log-${s.name}" style="display:${logOpen ? 'block' : 'none'}">
+            <pre>${escHtml(logLines)}</pre>
           </div>
       </div>`;
   }).join('');
@@ -164,25 +164,25 @@ async function loadSystemdUnits() {
     const running = u.active === 'active';
     const statusColor = running ? 'var(--green)' : u.active === 'failed' ? 'var(--red)' : 'var(--text3)';
     return `
-      <div class="card" style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;align-items:center;gap:10px;min-width:0">
-            <span style="font-size:9px;color:${running ? 'var(--green)' : 'var(--red)'}">${running ? '●' : '○'}</span>
-            <span style="font-weight:600;font-family:var(--font-mono);font-size:13px">${u.name}</span>
-            <span style="font-size:10px;padding:2px 8px;border-radius:5px;font-weight:600;background:${statusColor}1a;color:${statusColor};font-family:var(--font-mono)">${u.active}/${u.sub}</span>
+      <div class="svc-card">
+        <div class="svc-card-header">
+          <div class="svc-card-left">
+            <span class="svc-dot" style="color:${running ? 'var(--green)' : 'var(--red)'}">${running ? '●' : '○'}</span>
+            <span class="svc-name">${u.name}</span>
+            <span class="svc-badge" style="background:${statusColor}1a;color:${statusColor}">${u.active}/${u.sub}</span>
             <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${u.description}</span>
           </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <div class="svc-card-right">
             ${running
               ? `<button class="btn-sm" onclick="systemdAction('${u.name}','restart')">↺ Restart</button>
                  <button class="btn-danger btn-icon" onclick="systemdAction('${u.name}','stop')">■ Stop</button>`
               : `<button class="btn-green btn-sm" onclick="systemdAction('${u.name}','start')">▶ Start</button>`
             }
-            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('sys-${u.name}')" id="logbtn-sys-${u.name}">▼ Log</button>
+            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('sys-${u.name}')" id="logbtn-sys-${u.name}">▼</button>
           </div>
         </div>
-        <div id="log-sys-${u.name}" style="display:none;margin-top:12px">
-          <pre style="background:var(--bg1);border-radius:8px;padding:12px;font-size:11px;font-family:var(--font-mono);color:var(--text2);overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;margin:0"></pre>
+        <div class="svc-log-wrap" id="log-sys-${u.name}" style="display:none">
+          <pre></pre>
         </div>
       </div>`;
   }).join('');
