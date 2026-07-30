@@ -1,8 +1,8 @@
 import subprocess, asyncio, logging, os
 from pathlib import Path
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
 from fastapi.responses import Response
-from deps import CurrentUser
+from helpers.auth import get_current_user
 import httpx
 import websockets
 
@@ -37,6 +37,12 @@ def stop():
 
 @router.websocket("/ws")
 async def proxy_ws(websocket: WebSocket):
+    try:
+        get_current_user(websocket)
+    except HTTPException:
+        await websocket.close(code=1008, reason="Not authenticated")
+        return
+
     subprotocol = websocket.headers.get("sec-websocket-protocol")
     subprotocols = [s.strip() for s in subprotocol.split(",")] if subprotocol else None
     await websocket.accept(subprotocol=subprotocols[0] if subprotocols else None)
@@ -68,7 +74,7 @@ async def proxy_ws(websocket: WebSocket):
         logger.debug("terminal ws error: %s", e)
 
 @router.api_route("/{path:path}", methods=["GET"])
-async def proxy_http(path: str, request: Request):
+async def proxy_http(path: str, request: Request, username: str = Depends(get_current_user)):
     async with httpx.AsyncClient() as client:
         query = request.url.query
         url = f"http://127.0.0.1:{TTYD_PORT}/{path}"
@@ -79,8 +85,6 @@ async def proxy_http(path: str, request: Request):
             ct = resp.headers.get("content-type", "text/html")
             body = resp.content
             if "text/html" in ct:
-                body = body.replace(b'"/ws"', b'"/api/terminal/ws"')
-                body = body.replace(b"'/ws'", b"'/api/terminal/ws'")
                 body = body.replace(b'href="/', b'href="/api/terminal/')
                 body = body.replace(b'src="/', b'src="/api/terminal/')
             response = Response(content=body, media_type=ct, status_code=resp.status_code)
@@ -90,3 +94,4 @@ async def proxy_http(path: str, request: Request):
             return response
         except httpx.ConnectError:
             return Response("<h3>Terminal not available</h3>", media_type="text/html", status_code=503)
+
