@@ -1,6 +1,6 @@
 server {
     listen 8444 ssl;
-    server_name ${DOMAIN};
+    server_name ${DOMAIN} srtnl.${DOMAIN};
 
     ssl_certificate     ${BOT_DIR}/server.crt;
     ssl_certificate_key ${BOT_DIR}/server.key;
