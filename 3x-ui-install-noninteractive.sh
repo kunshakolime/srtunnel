@@ -45,31 +45,32 @@ arch() {
 }
 
 install_base() {
+    command -v curl &>/dev/null && command -v tar &>/dev/null && command -v openssl &>/dev/null && return
     case "${release}" in
         ubuntu | debian | armbian)
-            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl
+            apt-get update -qq && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl
         ;;
         fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
-            dnf -y update && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl
+            dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl
         ;;
         centos)
             if [[ "${VERSION_ID}" =~ ^7 ]]; then
-                yum -y update && yum install -y cronie curl tar tzdata socat ca-certificates openssl
+                yum install -y cronie curl tar tzdata socat ca-certificates openssl
             else
-                dnf -y update && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl
+                dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl
             fi
         ;;
         arch | manjaro | parch)
-            pacman -Syu && pacman -Syu --noconfirm cronie curl tar tzdata socat ca-certificates openssl
+            pacman -Syu --noconfirm cronie curl tar tzdata socat ca-certificates openssl
         ;;
         opensuse-tumbleweed | opensuse-leap)
-            zypper refresh && zypper -q install -y cron curl tar timezone socat ca-certificates openssl
+            zypper -q install -y cron curl tar timezone socat ca-certificates openssl
         ;;
         alpine)
-            apk update && apk add dcron curl tar tzdata socat ca-certificates openssl
+            apk add dcron curl tar tzdata socat ca-certificates openssl
         ;;
         *)
-            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl
+            apt-get update -qq && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl
         ;;
     esac
 }
