@@ -19,11 +19,11 @@ _proc: subprocess.Popen | None = None
 
 def start():
     global _proc
-    if _proc and _proc.poll() is None:
-        return
+    stop()
     if not os.path.exists(TTYD_BIN):
         logger.warning("ttyd binary not found at %s", TTYD_BIN)
         return
+    subprocess.run(["pkill", "-9", "-f", f"ttyd.*{TTYD_PORT}"], capture_output=True)
     _proc = subprocess.Popen(
         [TTYD_BIN, "-p", str(TTYD_PORT), "-i", "127.0.0.1", "-W", "-a", TMUX_WRAPPER],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
