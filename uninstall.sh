@@ -13,9 +13,6 @@ echo "========================================"
 echo "  srtunnel Uninstall Script"
 echo "========================================"
 echo ""
-echo "This will remove srtunnel and all associated services, configs, and files."
-confirm "Are you sure you want to proceed?" || { echo "Aborted."; exit 0; }
-
 tmux kill-server 2>/dev/null || true
 # ── Stop & Disable Services ───────────────────────────────────────────────────
 echo ""
