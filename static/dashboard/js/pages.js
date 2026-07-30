@@ -560,8 +560,8 @@ async function setSvcStatus(name, status) {
 
 let _terminalLoaded = false;
 
-function loadTerminal() {
-  if (_terminalLoaded) return;
+function loadTerminal(force = false) {
+  if (_terminalLoaded && !force) return;
   _terminalLoaded = true;
   const token = TOKEN || localStorage.getItem('home_token') || '';
   const el = document.getElementById('terminal-body');
