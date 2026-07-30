@@ -282,7 +282,7 @@ function logout() {
   HOME_API = ''; HOME_TOKEN = ''; TOKEN = ''; API = ''; _servers = []; _activeId = null;
   document.getElementById('loginPage').style.display = '';
   document.getElementById('app').style.display       = 'none';
-  document.getElementById('loginUser').value  = '';
+  document.getElementById('loginUser').value  = 'root';
   document.getElementById('loginPass').value  = '';
   document.getElementById('loginToken').value = '';
 }
