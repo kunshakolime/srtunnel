@@ -17,13 +17,13 @@ _proc: subprocess.Popen | None = None
 
 def start():
     global _proc
-    if _proc:
+    if _proc and _proc.poll() is None:
         return
     if not os.path.exists(TTYD_BIN):
         logger.warning("ttyd binary not found at %s", TTYD_BIN)
         return
     _proc = subprocess.Popen(
-        [TTYD_BIN, "-p", str(TTYD_PORT), "-i", "127.0.0.1", "-o",
+        [TTYD_BIN, "-p", str(TTYD_PORT), "-i", "127.0.0.1", "-W",
          "tmux", "new-session", "-A", "-s", "dashboard"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
@@ -34,6 +34,38 @@ def stop():
     if _proc:
         _proc.terminate()
         _proc = None
+
+@router.websocket("/ws")
+async def proxy_ws(websocket: WebSocket):
+    subprotocol = websocket.headers.get("sec-websocket-protocol")
+    subprotocols = [s.strip() for s in subprotocol.split(",")] if subprotocol else None
+    await websocket.accept(subprotocol=subprotocols[0] if subprotocols else None)
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{TTYD_PORT}/ws",
+            subprotocols=subprotocols
+        ) as ws:
+            async def fwd():
+                while True:
+                    msg = await websocket.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+                    if "text" in msg and msg["text"] is not None:
+                        await ws.send(msg["text"])
+                    elif "bytes" in msg and msg["bytes"] is not None:
+                        await ws.send(msg["bytes"])
+            async def bwd():
+                while True:
+                    data = await ws.recv()
+                    if isinstance(data, bytes):
+                        await websocket.send_bytes(data)
+                    else:
+                        await websocket.send_text(data)
+            await asyncio.gather(fwd(), bwd())
+    except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+        pass
+    except Exception as e:
+        logger.debug("terminal ws error: %s", e)
 
 @router.api_route("/{path:path}", methods=["GET"])
 async def proxy_http(path: str, request: Request):
@@ -58,22 +90,3 @@ async def proxy_http(path: str, request: Request):
             return response
         except httpx.ConnectError:
             return Response("<h3>Terminal not available</h3>", media_type="text/html", status_code=503)
-
-@router.websocket("/ws")
-async def proxy_ws(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        async with websockets.connect(f"ws://127.0.0.1:{TTYD_PORT}/ws") as ws:
-            async def fwd():
-                while True:
-                    data = await websocket.receive_text()
-                    await ws.send(data)
-            async def bwd():
-                while True:
-                    data = await ws.recv()
-                    await websocket.send_text(data if isinstance(data, str) else data.decode())
-            await asyncio.gather(fwd(), bwd())
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.debug("terminal ws error: %s", e)

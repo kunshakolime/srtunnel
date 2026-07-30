@@ -16,6 +16,8 @@ ALGORITHM  = "HS256"
 
 TOKENS_FILE = Path(__file__).resolve().parent / "tokens.json"
 
+from starlette.requests import HTTPConnection
+
 security = HTTPBearer(auto_error=False)
 
 # ── tokens.json helpers ───────────────────────────────────────────────────────
@@ -65,13 +67,11 @@ def create_token(username: str) -> str:
     raw = jwt.encode({"sub": username}, SECRET_KEY, algorithm=ALGORITHM)
     return raw
 
-def get_current_user(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
-):
+def get_current_user(request: HTTPConnection):
     raw = None
-    if credentials and credentials.credentials:
-        raw = credentials.credentials
+    auth_hdr = request.headers.get("authorization")
+    if auth_hdr and auth_hdr.lower().startswith("bearer "):
+        raw = auth_hdr[7:].strip()
     elif "token" in request.query_params:
         raw = request.query_params["token"]
     elif "access_token" in request.cookies:
