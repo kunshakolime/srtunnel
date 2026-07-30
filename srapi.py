@@ -16,6 +16,7 @@ import httpx, yaml, logging, traceback, time
 
 from helpers import core, dns, monitor
 from helpers import services as svc_helper
+from helpers.auth import get_current_user
 from deps import cfg
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -127,7 +128,7 @@ app.include_router(files.router)
 app.include_router(services.router)
 app.include_router(system.router)
 app.include_router(systemd.router)
-app.include_router(terminal.router, dependencies=[Depends(CurrentUser)])
+app.include_router(terminal.router, dependencies=[Depends(get_current_user)])
 
 
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────
