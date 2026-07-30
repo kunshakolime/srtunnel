@@ -121,8 +121,8 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 /* ── SECTION HEADER ── */
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
 .section-header h3{font-size:16px;font-weight:600}
-.dash-spin-icon{display:inline-block;font-size:14px;margin-right:4px}
-.dash-spin-icon.spinning{animation:dashSpin .6s linear infinite}
+.dash-spin-icon{font-size:15px;cursor:default;opacity:.4;transition:opacity .2s}
+.dash-spin-icon.spinning{opacity:1;animation:dashSpin .6s linear infinite}
 @keyframes dashSpin{to{transform:rotate(360deg)}}
 .hdr-actions{display:flex;gap:8px}
 
