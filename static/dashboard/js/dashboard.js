@@ -5,11 +5,6 @@ const LOADING_HTML = '<div style="text-align:center;padding:40px"><span class="s
 async function loadDashboard() {
   const metricsEl = document.getElementById('metrics');
   const spinEl = document.getElementById('dash-spin');
-
-  const isFirstLoad = !metricsEl.innerHTML || metricsEl.innerHTML.includes('Loading...');
-  if (isFirstLoad) {
-    metricsEl.innerHTML = LOADING_HTML;
-  }
   if (spinEl) spinEl.classList.add('spinning');
 
   try {
@@ -29,39 +24,57 @@ async function loadDashboard() {
       return 'var(--accent)';
     }
 
-    metricsEl.innerHTML = `
-      <div class="metric">
-        <div class="metric-label">CPU</div>
-        <div class="metric-value">${cpu}<span style="font-size:14px;color:var(--text3)">%</span></div>
-        <div class="bar-wrap"><div class="bar" style="width:${cpu}%;background:${barColor(cpu)}"></div></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">RAM</div>
-        <div class="metric-value">${ram}<span style="font-size:14px;color:var(--text3)">%</span></div>
-        <div class="metric-sub">${parseFloat(d.ram_used||0).toFixed(2)} / ${parseFloat(d.ram_total||0).toFixed(1)} GB</div>
-        <div class="bar-wrap"><div class="bar" style="width:${ram}%;background:${barColor(ram)}"></div></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Disk</div>
-        <div class="metric-value">${disk}<span style="font-size:14px;color:var(--text3)">%</span></div>
-        <div class="metric-sub">${parseFloat(d.disk_used||0).toFixed(2)} / ${parseFloat(d.disk_total||0).toFixed(1)} GB</div>
-        <div class="bar-wrap"><div class="bar" style="width:${disk}%;background:${barColor(disk)}"></div></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Public IP</div>
-        <div class="metric-value" style="font-size:15px;font-family:var(--font-mono)">${d.ip || '—'}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Connections</div>
-        <div class="metric-value connections-val">${conns}</div>
-      </div>
-    `;
+    if (!metricsEl.dataset.built) {
+      metricsEl.innerHTML = `
+        <div class="metric">
+          <div class="metric-label">CPU</div>
+          <div class="metric-value" id="m-cpu">${cpu}<span style="font-size:14px;color:var(--text3)">%</span></div>
+          <div class="bar-wrap"><div class="bar" id="m-cpu-bar" style="width:${cpu}%;background:${barColor(cpu)}"></div></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">RAM</div>
+          <div class="metric-value" id="m-ram">${ram}<span style="font-size:14px;color:var(--text3)">%</span></div>
+          <div class="metric-sub" id="m-ram-sub">${parseFloat(d.ram_used||0).toFixed(2)} / ${parseFloat(d.ram_total||0).toFixed(1)} GB</div>
+          <div class="bar-wrap"><div class="bar" id="m-ram-bar" style="width:${ram}%;background:${barColor(ram)}"></div></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Disk</div>
+          <div class="metric-value" id="m-disk">${disk}<span style="font-size:14px;color:var(--text3)">%</span></div>
+          <div class="metric-sub" id="m-disk-sub">${parseFloat(d.disk_used||0).toFixed(2)} / ${parseFloat(d.disk_total||0).toFixed(1)} GB</div>
+          <div class="bar-wrap"><div class="bar" id="m-disk-bar" style="width:${disk}%;background:${barColor(disk)}"></div></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Public IP</div>
+          <div class="metric-value" id="m-ip" style="font-size:15px;font-family:var(--font-mono)">${d.ip || '—'}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Connections</div>
+          <div class="metric-value connections-val" id="m-conns">${conns}</div>
+        </div>`;
+      metricsEl.dataset.built = '1';
+    } else {
+      document.getElementById('m-cpu').childNodes[0].textContent = cpu;
+      document.getElementById('m-cpu-bar').style.width = cpu + '%';
+      document.getElementById('m-cpu-bar').style.background = barColor(cpu);
+      document.getElementById('m-ram').childNodes[0].textContent = ram;
+      document.getElementById('m-ram-bar').style.width = ram + '%';
+      document.getElementById('m-ram-bar').style.background = barColor(ram);
+      document.getElementById('m-ram-sub').textContent = `${parseFloat(d.ram_used||0).toFixed(2)} / ${parseFloat(d.ram_total||0).toFixed(1)} GB`;
+      document.getElementById('m-disk').childNodes[0].textContent = disk;
+      document.getElementById('m-disk-bar').style.width = disk + '%';
+      document.getElementById('m-disk-bar').style.background = barColor(disk);
+      document.getElementById('m-disk-sub').textContent = `${parseFloat(d.disk_used||0).toFixed(2)} / ${parseFloat(d.disk_total||0).toFixed(1)} GB`;
+      document.getElementById('m-ip').textContent = d.ip || '—';
+      document.getElementById('m-conns').textContent = conns;
+    }
     document.getElementById('bwDown').textContent = d.bandwidth?.rx || '—';
     document.getElementById('bwUp').textContent = d.bandwidth?.tx || '—';
     markRefresh();
   } catch (e) {
     console.error('Dashboard error', e);
-    metricsEl.innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
+    if (!metricsEl.dataset.built) {
+      metricsEl.innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
+    }
   }
   if (spinEl) spinEl.classList.remove('spinning');
 }
