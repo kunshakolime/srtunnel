@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/srtunnel/venv/bin/python
 import os, time, subprocess, curses
 from pathlib import Path
 from ruamel.yaml import YAML
