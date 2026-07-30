@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import sys, os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -143,7 +143,7 @@ async def proxy_3xui(request: Request, path: str):
 
 # ── Dump directory listing ───────────────────────────────────────────────────
 
-DUMP_DIR = BASE_DIR / "srtdash" / "dump"
+DUMP_DIR = BASE_DIR / "static" / "dump"
 
 @app.get("/dump/")
 def dump_listing():
@@ -160,20 +160,10 @@ def dump_listing():
         })
     return entries
 
-
-# ── Static files (must be LAST — catches all unmatched routes) ──────────────
-
-STATIC_DIR = BASE_DIR / "srtdash"
+STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
-
 if __name__ == "__main__":
     import uvicorn
-    ssl_cert = os.environ.get("SSL_CERT", str(BASE_DIR / "server.crt"))
-    ssl_key  = os.environ.get("SSL_KEY",  str(BASE_DIR / "server.key"))
-    kwargs = {}
-    if os.path.isfile(ssl_cert) and os.path.isfile(ssl_key):
-        kwargs["ssl_certfile"] = ssl_cert
-        kwargs["ssl_keyfile"]  = ssl_key
-    uvicorn.run("srapi:app", host="0.0.0.0", port=8444, reload=False, access_log=False, **kwargs)
+    uvicorn.run("srapi:app", host="0.0.0.0", port=57000, reload=False, access_log=False)

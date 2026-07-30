@@ -33,7 +33,7 @@ telegram_bot:
   config_file: "./zivpn.json"
   default_password: "123"
   token: "${TOKEN}"
-  primary_url: "https://127.0.0.1:8444"
+  primary_url: "http://127.0.0.1:57000"
   domain: "${DOMAIN}"
   cf_root_domain: "${CF_ROOT_DOMAIN}"   # ← root domain for DNS management
   cf_token: "${CF_TOKEN}"
