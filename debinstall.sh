@@ -36,9 +36,11 @@ case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 
 # ── APT Dependencies ──────────────────────────────────────────────────────────
 echo "Installing base dependencies..."
-curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
-apt update -qq
-apt install -y -qq speedtest
+if ! command -v speedtest &>/dev/null; then
+    curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
+    apt update -qq
+    apt install -y -qq speedtest
+fi
 apt install -y -qq git openssh-server stunnel4 python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables libpam0g-dev nginx libnginx-mod-stream
 
 if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
@@ -157,6 +159,7 @@ if [[ -n "$DOMAIN" ]]; then
         --standalone \
         --non-interactive --agree-tos --register-unsafely-without-email \
         --expand \
+        --force-renewal \
         "${DOMAIN_ARGS[@]}"; then
 
         LIVE="/etc/letsencrypt/live/$DOMAIN"
