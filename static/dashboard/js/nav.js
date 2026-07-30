@@ -73,7 +73,7 @@ const _loaders = {
   users:   () => loadUsers(),
   xray:    () => loadXray(),
   dns:     () => loadDns(),
-  terminal: () => loadTerminal(),
+  terminal: (force) => loadTerminal(force),
   scope:   () => loadScope(),
   servers: () => { loadServersPage(); loadTokens(); },
   tokens:  () => {},
@@ -84,7 +84,7 @@ function manualRefresh() {
   if (_currentPage === 'dashboard') { loadDashboard(); return; }
   if (_currentPage === 'services')  { loadServices();  return; }
   const loader = _loaders[_currentPage];
-  if (loader) loader();
+  if (loader) loader(true);
 }
 
 // ── Last-refresh stamp (in dash-spin) ─────────────────────────────────────────
