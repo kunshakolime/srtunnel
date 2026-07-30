@@ -580,14 +580,16 @@ function attachTerminalIframe(sessionName) {
 async function refreshTerminalSessions() {
   try {
     const res = await apiFetch('/api/terminal/sessions');
-    if (res && res.sessions) {
+    if (!res || !res.ok) return;
+    const d = await res.json();
+    if (d && d.sessions) {
       const sel = document.getElementById('terminal-session-select');
       if (sel) {
-        sel.innerHTML = res.sessions.map(s => 
+        sel.innerHTML = d.sessions.map(s => 
           `<option value="${escHtml(s)}" ${s === _currentTerminalSession ? 'selected' : ''}>${escHtml(s)}</option>`
         ).join('');
-        if (!res.sessions.includes(_currentTerminalSession)) {
-          _currentTerminalSession = res.sessions[0] || 'dashboard';
+        if (!d.sessions.includes(_currentTerminalSession)) {
+          _currentTerminalSession = d.sessions[0] || 'dashboard';
         }
         sel.value = _currentTerminalSession;
       }
