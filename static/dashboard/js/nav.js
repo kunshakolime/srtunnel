@@ -29,13 +29,25 @@ function showPage(name, btn) {
 
 // ── Dashboard auto-refresh (own timer, no overlap) ────────────────────────────
 
-const DASHBOARD_INTERVAL = 5_000;
+function _getDashInterval() {
+  return parseInt(localStorage.getItem('dash_interval')) || 5000;
+}
+
 let _dashTimer   = null;
 let _dashFetching = false;
 
+function setDashInterval(val) {
+  localStorage.setItem('dash_interval', val);
+  if (_currentPage === 'dashboard') {
+    _stopDashboardTimer();
+    if (parseInt(val) > 0) _startDashboardTimer();
+  }
+}
+
 function _startDashboardTimer() {
   _stopDashboardTimer();
-  if (!document.hidden) _dashTimer = setTimeout(_dashTick, DASHBOARD_INTERVAL);
+  const ms = _getDashInterval();
+  if (ms > 0 && !document.hidden) _dashTimer = setTimeout(_dashTick, ms);
 }
 
 function _stopDashboardTimer() {
@@ -45,12 +57,13 @@ function _stopDashboardTimer() {
 
 async function _dashTick() {
   if (_currentPage !== 'dashboard' || document.hidden || _sessionDead) return;
-  if (_dashFetching) { _dashTimer = setTimeout(_dashTick, DASHBOARD_INTERVAL); return; }
+  const ms = _getDashInterval();
+  if (_dashFetching) { _dashTimer = setTimeout(_dashTick, ms); return; }
   _dashFetching = true;
   try { await loadDashboard(); } catch { /* silent */ }
   _dashFetching = false;
   if (_currentPage === 'dashboard' && !document.hidden && !_sessionDead) {
-    _dashTimer = setTimeout(_dashTick, DASHBOARD_INTERVAL);
+    _dashTimer = setTimeout(_dashTick, ms);
   }
 }
 
@@ -125,6 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.modal').forEach(m => {
     m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
   });
+  const sel = document.getElementById('dash-interval');
+  if (sel) sel.value = '' + _getDashInterval();
 });
 
 function copySessionToken() {

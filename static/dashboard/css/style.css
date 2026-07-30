@@ -126,6 +126,9 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 .dash-spin-icon.spinning{opacity:1}
 .dash-spin-icon.spinning .spin-char{animation:dashSpin .6s linear infinite}
 .dash-stamp{font-family:var(--font-mono);font-size:11px;color:var(--text3);min-width:50px;text-align:right}
+.dash-interval{background:none;border:none;color:var(--text3);font-family:var(--font-mono);font-size:11px;cursor:pointer;outline:none;padding:0;margin:0;opacity:.4;transition:opacity .2s}
+.dash-interval:hover{opacity:.7}
+.dash-interval option{background:var(--bg2);color:var(--text1)}
 @keyframes dashSpin{to{transform:rotate(360deg)}}
 .hdr-actions{display:flex;gap:8px}
 
@@ -396,6 +399,8 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
   .modal-box { padding: 20px 16px; border-radius: 14px; }
 
   /* scope grid already goes 1-col at 600px */
+
+    .dash-interval { font-size: 10px; }
 
   /* ── SERVICES (mobile) ── */
   .svc-toolbar { gap: 6px; }
