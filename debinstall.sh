@@ -138,6 +138,9 @@ if ! grep -q "stream-enabled" /etc/nginx/nginx.conf; then
     sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
 fi
 
+# Remove default site (binds port 80, conflicts with stream)
+rm -f /etc/nginx/sites-enabled/default
+
 # ── TLS Certificate ───────────────────────────────────────────────────────────
 ./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub
 openssl req -x509 -newkey rsa:4096 -nodes -out server.crt -keyout server.key -days 365 -subj "/CN=localhost"
