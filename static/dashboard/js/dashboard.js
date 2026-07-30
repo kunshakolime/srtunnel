@@ -4,17 +4,14 @@ const LOADING_HTML = '<div style="text-align:center;padding:40px"><span class="s
 
 async function loadDashboard() {
   const metricsEl = document.getElementById('metrics');
-  
-  // Show subtle loading state only if there's existing content
+  const spinEl = document.getElementById('dash-spin');
+
   const isFirstLoad = !metricsEl.innerHTML || metricsEl.innerHTML.includes('Loading...');
   if (isFirstLoad) {
     metricsEl.innerHTML = LOADING_HTML;
-  } else {
-    // Subtle loading indicator for refreshes
-    metricsEl.style.opacity = '0.6';
-    metricsEl.style.pointerEvents = 'none';
   }
-  
+  if (spinEl) spinEl.classList.add('spinning');
+
   try {
     const res = await apiFetch('/api/system');
     if (!res.ok) {
@@ -59,17 +56,14 @@ async function loadDashboard() {
         <div class="metric-value connections-val">${conns}</div>
       </div>
     `;
-    metricsEl.style.opacity = '1';
-    metricsEl.style.pointerEvents = 'auto';
     document.getElementById('bwDown').textContent = d.bandwidth?.rx || '—';
     document.getElementById('bwUp').textContent = d.bandwidth?.tx || '—';
     markRefresh();
   } catch (e) {
     console.error('Dashboard error', e);
     metricsEl.innerHTML = '<div class="metric"><div class="metric-label">Error</div><div class="metric-value" style="color:var(--red)">'+e.message+'</div></div>';
-    metricsEl.style.opacity = '1';
-    metricsEl.style.pointerEvents = 'auto';
   }
+  if (spinEl) spinEl.classList.remove('spinning');
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────
