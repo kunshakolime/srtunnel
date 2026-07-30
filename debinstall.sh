@@ -132,28 +132,7 @@ server {
 }
 EOF
 
-# Srtdash nginx server block — terminates SSL on 8444, proxies to srapi on 57000
-cat > /etc/nginx/sites-available/srtdash << EOF
-server {
-    listen 8444 ssl;
-    server_name $DOMAIN;
-
-    ssl_certificate     $BOT_DIR/server.crt;
-    ssl_certificate_key $BOT_DIR/server.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:57000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-
+envsubst '${DOMAIN}${BOT_DIR}' < srtdash.nginx > /etc/nginx/sites-available/srtdash
 ln -sf /etc/nginx/sites-available/srtdash /etc/nginx/sites-enabled/srtdash
 
 # Add stream block to nginx.conf
