@@ -118,11 +118,11 @@ cat > /etc/nginx/stream-enabled/srtdash << EOF
 map_hash_bucket_size 128;
 
 map \$ssl_preread_server_name \$backend {
-    default      127.0.0.1:8443;
-        $DOMAIN  127.0.0.1:8444;
-    rt1.$DOMAIN  127.0.0.1:8444;
-    rt2.$DOMAIN  127.0.0.1:8445;
-    rt3.$DOMAIN  127.0.0.1:8446;
+    default        127.0.0.1:8443;
+    $DOMAIN        127.0.0.1:8444;
+    srtnl.$DOMAIN  127.0.0.1:8444;
+    rt1.$DOMAIN    127.0.0.1:8445;
+    rt2.$DOMAIN    127.0.0.1:8446;
 }
 
 server {
@@ -142,7 +142,7 @@ fi
 openssl req -x509 -newkey rsa:4096 -nodes -out server.crt -keyout server.key -days 365 -subj "/CN=localhost"
 echo "Test certificates generated."
 if [[ -n "$DOMAIN" ]]; then
-    CERT_DOMAINS=("$DOMAIN" "rt1.$DOMAIN" "rt2.$DOMAIN" "rt3.$DOMAIN")
+    CERT_DOMAINS=("$DOMAIN" "srtnl.$DOMAIN" "rt1.$DOMAIN" "rt2.$DOMAIN")
     DOMAIN_ARGS=(); for d in "${CERT_DOMAINS[@]}"; do DOMAIN_ARGS+=(-d "$d"); done
 
     systemctl stop nginx 2>/dev/null || true
