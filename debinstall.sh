@@ -187,6 +187,7 @@ After=network.target
 ExecStart=/opt/srtunnel/venv/bin/python /opt/srtunnel/srapi.py
 WorkingDirectory=/opt/srtunnel
 Restart=always
+KillMode=process
 Environment=PATH=/opt/srtunnel/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/root
 
