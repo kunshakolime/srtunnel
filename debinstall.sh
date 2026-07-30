@@ -106,6 +106,8 @@ DOMAIN="${DOMAIN:-}"
 SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd.$DOMAIN}"
 
 
+# Capture DASH_PASS from environment explicitly (survives sudo/pipe env stripping)
+DASH_PASS="${DASH_PASS:-}"
 export BOT_DIR IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE DASH_PASS
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
@@ -202,6 +204,10 @@ systemctl enable nginx
 systemctl restart nginx
 
 export PANEL_PORT=57001 WEBPATH=3x-ui PASS="${DASH_PASS}"
-. <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh | sed 's/\r$//')
+if [[ -f "$BOT_DIR/3x-ui-install-noninteractive.sh" ]]; then
+    . "$BOT_DIR/3x-ui-install-noninteractive.sh"
+else
+    . <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh | sed 's/\r$//')
+fi
 
 echo "tunnel up and running"
