@@ -188,10 +188,12 @@ async function _fetchServerStatus() {
     const text = await res.text();
     if (!text || !text.trim().startsWith('[')) return;
     const servers = JSON.parse(text);
+    const active = getActiveServer();
     for (const s of servers) {
-      _statusCache[s.url] = { online: s.online ?? false, last_seen: s.last_seen };
+      const online = s.url === active?.url ? true : (s.online ?? false);
+      _statusCache[s.url] = { online, last_seen: s.last_seen };
       const dot = document.getElementById('hub-dot-' + s.id);
-      if (dot) dot.className = 'server-dot ' + (s.online ? 'online' : 'offline');
+      if (dot) dot.className = 'server-dot ' + (online ? 'online' : 'offline');
     }
   } catch { /* silent — dots stay as-is */ }
 }
@@ -216,9 +218,11 @@ async function renderHub() {
   const container = document.getElementById('hubServers');
   if (!container) return;
 
+  const active = getActiveServer();
   container.innerHTML = list.map(s => {
+    const isActive = s.url === active?.url;
     const cached = _statusCache[s.url];
-    const dotClass = cached ? (cached.online ? 'online' : 'offline') : 'checking';
+    const dotClass = isActive ? 'online' : (cached ? (cached.online ? 'online' : 'offline') : 'checking');
     const isHome   = s.url === HOME_API;
     return `
     <div class="hub-server ${s.id === activeId ? 'active' : ''}" id="hub-srv-${s.id}" onclick="switchServer('${s.id}')">
