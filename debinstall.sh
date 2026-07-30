@@ -145,6 +145,8 @@ if [[ -n "$DOMAIN" ]]; then
     CERT_DOMAINS=("$DOMAIN" "rt1.$DOMAIN" "rt2.$DOMAIN" "rt3.$DOMAIN")
     DOMAIN_ARGS=(); for d in "${CERT_DOMAINS[@]}"; do DOMAIN_ARGS+=(-d "$d"); done
 
+    systemctl stop nginx 2>/dev/null || true
+
     if $BOT_DIR/venv/bin/certbot certonly \
         --standalone \
         --non-interactive --agree-tos --register-unsafely-without-email \
@@ -162,6 +164,8 @@ if [[ -n "$DOMAIN" ]]; then
     else
         echo "WARNING: certbot failed, keeping self-signed certs."
     fi
+
+    systemctl start nginx 2>/dev/null || true
 fi
 
 cat > /etc/systemd/system/srapi.service << 'EOF'
