@@ -104,7 +104,7 @@ DOMAIN="${DOMAIN:-}"
 SLOWDNSDOMAIN="${SLOWDNSDOMAIN:-sd.$DOMAIN}"
 
 
-export BOT_DIR IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE XRAY_PASS
+export BOT_DIR IFACE SSH TOKEN DOMAIN SLOWDNSDOMAIN H1_PR H2_PR ZU_PR UC_PR MY_SPEED SSL HTTP HTTPS CF_ROOT_DOMAIN CF_TOKEN CF_ZONE DASH_PASS
 # ── Render Config ─────────────────────────────────────────────────────────────
 envsubst < config.template.yaml > config.yaml
 envsubst '$DOMAIN' < xray.template.json > xray.json
