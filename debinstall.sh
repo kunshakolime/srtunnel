@@ -41,12 +41,10 @@ apt update -qq
 apt install -y -qq speedtest
 apt install -y -qq git openssh-server stunnel4 python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables libpam0g-dev nginx libnginx-mod-stream
 
-cd
 if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
-    git clone https://github.com/kunshakolime/srtunnel.git
-    BOT_DIR="/opt/srtunnel"
+    git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
 fi
-cd $BOT_DIR
+cd "$BOT_DIR"
 mv ./bin/deb13amd64/* ./
 rm -rf ./bin/
 chmod +x ./*
