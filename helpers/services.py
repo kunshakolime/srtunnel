@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 import logging
+import shlex
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -105,7 +106,7 @@ def _start_session(s: Service):
     log_file = LOG_DIR / f"{s.name}.log"
     log_file.write_text("")  # clear old log
     cmd = ["tmux", "new-session", "-d", "-s", s.name,
-           "bash", "-c", f"exec {s.command} >>{log_file} 2>&1; echo EXIT:$? >>{log_file}"]
+           "bash", "-c", f"script -q --flush -e -c {shlex.quote(s.command)} {shlex.quote(str(log_file))} 2>/dev/null"]
     r = subprocess.run(
         cmd, cwd=str(CONFIG_FILE.parent),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
