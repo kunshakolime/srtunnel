@@ -50,12 +50,14 @@ async function loadServices() {
   const toggleBtn = document.getElementById('watcher-toggle-btn');
   if (d.watcher) {
     badge.textContent = '● Watcher ON';
-    badge.style.cssText = 'font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:6px;font-weight:600;background:rgba(52,199,106,.15);color:var(--green)';
+    badge.style.background = 'rgba(52,199,106,.15)';
+    badge.style.color = 'var(--green)';
     toggleBtn.textContent = 'Stop Watcher';
     toggleBtn.className = 'btn-sm btn-danger';
   } else {
     badge.textContent = '○ Watcher OFF';
-    badge.style.cssText = 'font-size:11px;font-family:var(--font-mono);padding:4px 10px;border-radius:6px;font-weight:600;background:rgba(240,64,96,.12);color:var(--red)';
+    badge.style.background = 'rgba(240,64,96,.12)';
+    badge.style.color = 'var(--red)';
     toggleBtn.textContent = 'Start Watcher';
     toggleBtn.className = 'btn-sm btn-green';
   }
