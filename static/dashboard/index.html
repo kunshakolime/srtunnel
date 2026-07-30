@@ -59,7 +59,6 @@
       <button onclick="showPage('users',this)">Users</button>
       <button onclick="showPage('xray',this)">Xray</button>
       <button onclick="showPage('services',this)">Services</button>
-      <button onclick="showPage('speedtest',this)">Speed Test</button>
       <button onclick="showPage('dns',this)">DNS</button>
       <button onclick="showPage('backup',this)">Backup</button>
       <button onclick="showPage('scope',this)">Scope</button>
@@ -95,6 +94,16 @@
             <div class="metric-label">Upload</div>
             <div id="bwUp" class="metric-value" style="font-size:18px;margin-top:6px">—</div>
           </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="speedtest-wrap">
+          <div id="st-status" class="speedtest-status">Ready to test</div>
+          <div class="speedtest-bar"><div id="st-fill" class="speedtest-fill"></div></div>
+          <div id="st-pct" style="font-family:var(--font-mono);font-size:28px;font-weight:600;color:var(--accent);margin:10px 0">—</div>
+          <button id="st-btn" class="btn" style="padding:10px 30px" onclick="runSpeedtest()">▶ Start Test</button>
+          <div id="st-results" class="speed-results" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -154,20 +163,6 @@
         </div>
       </div>
       <div id="servicesList"></div>
-    </div>
-
-    <!-- SPEED TEST -->
-    <div id="page-speedtest" class="page">
-      <div class="section-header"><h3>Speed Test</h3></div>
-      <div class="card">
-        <div class="speedtest-wrap">
-          <div id="st-status" class="speedtest-status">Ready to test</div>
-          <div class="speedtest-bar"><div id="st-fill" class="speedtest-fill"></div></div>
-          <div id="st-pct" style="font-family:var(--font-mono);font-size:28px;font-weight:600;color:var(--accent);margin:10px 0">—</div>
-          <button id="st-btn" class="btn" style="padding:10px 30px" onclick="runSpeedtest()">▶ Start Test</button>
-          <div id="st-results" class="speed-results" style="display:none"></div>
-        </div>
-      </div>
     </div>
 
     <!-- DNS -->
