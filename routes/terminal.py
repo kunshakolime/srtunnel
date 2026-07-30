@@ -51,7 +51,11 @@ async def proxy_http(path: str, request: Request):
                 body = body.replace(b"'/ws'", b"'/api/terminal/ws'")
                 body = body.replace(b'href="/', b'href="/api/terminal/')
                 body = body.replace(b'src="/', b'src="/api/terminal/')
-            return Response(content=body, media_type=ct, status_code=resp.status_code)
+            response = Response(content=body, media_type=ct, status_code=resp.status_code)
+            tok = request.query_params.get("token")
+            if tok:
+                response.set_cookie("access_token", tok, path="/", samesite="lax", httponly=True)
+            return response
         except httpx.ConnectError:
             return Response("<h3>Terminal not available</h3>", media_type="text/html", status_code=503)
 
