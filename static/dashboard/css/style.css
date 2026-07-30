@@ -121,7 +121,7 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 /* ── SECTION HEADER ── */
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
 .section-header h3{font-size:16px;font-weight:600}
-.dash-spin-icon{display:inline-flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;opacity:.4;transition:opacity .2s;user-select:none}
+.dash-spin-icon{display:inline-flex;align-items:center;gap:3px;font-size:13px;cursor:pointer;opacity:.4;transition:opacity .2s;user-select:none}
 .dash-spin-icon:hover{opacity:.7}
 .dash-spin-icon.spinning{opacity:1}
 .dash-spin-icon.spinning .spin-char{animation:dashSpin .6s linear infinite}
