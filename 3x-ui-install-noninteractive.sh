@@ -295,18 +295,18 @@ install_x-ui() {
 }
 
 export_results() {
-    local u="${OUTPUT_USERNAME:-root}" p="${OUTPUT_PASSWORD:-${PASS:-}}"
-    local scheme="https" host="${DOMAIN:-server}"
-    echo ""
-    echo "============================================"
-    echo "  3x-ui Panel"
-    echo "    URL:  https://srtnl.${host}/3x-ui/"
-    echo "    User: $u"
-    echo "    Pass: ${p:-<not set>}"
-    echo ""
-    echo "  Dashboard"
-    echo "    URL:  https://srtnl.${host}/dashboard/"
-    echo "============================================"
+    echo "# ============================================================================"
+    echo "# Installation Results"
+    echo "# ============================================================================"
+    echo "export OUTPUT_USERNAME='${OUTPUT_USERNAME}'"
+    echo "export OUTPUT_PASSWORD='${OUTPUT_PASSWORD}'"
+    echo "export OUTPUT_PORT='${OUTPUT_PORT}'"
+    echo "export OUTPUT_WEBBASEPATH='${OUTPUT_WEBBASEPATH}'"
+    echo "export OUTPUT_ACCESS_URL='${OUTPUT_ACCESS_URL}'"
+    echo "export OUTPUT_SSL_HOST='${OUTPUT_SSL_HOST}'"
+    echo "export OUTPUT_SSL_SCHEME='${OUTPUT_SSL_SCHEME}'"
+    echo "export OUTPUT_INSTALL_STATUS='${OUTPUT_INSTALL_STATUS}'"
+    echo "# ============================================================================"
 }
 
 install_base
