@@ -10,6 +10,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 TTYD_PORT = 57002
 TTYD_BIN = str(BASE_DIR / "ttyd")
 
+TMUX_WRAPPER = str(BASE_DIR / "helpers" / "tmux_wrapper.sh")
+
 logger = logging.getLogger("srapi.terminal")
 router = APIRouter(prefix="/api/terminal")
 
@@ -23,17 +25,33 @@ def start():
         logger.warning("ttyd binary not found at %s", TTYD_BIN)
         return
     _proc = subprocess.Popen(
-        [TTYD_BIN, "-p", str(TTYD_PORT), "-i", "127.0.0.1", "-W",
-         "tmux", "new-session", "-A", "-s", "dashboard"],
+        [TTYD_BIN, "-p", str(TTYD_PORT), "-i", "127.0.0.1", "-W", "-a", TMUX_WRAPPER],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    logger.info("ttyd started on port %d", TTYD_PORT)
+    logger.info("ttyd started on port %d with tmux wrapper", TTYD_PORT)
 
 def stop():
     global _proc
     if _proc:
         _proc.terminate()
         _proc = None
+
+@router.get("/sessions")
+def list_sessions(username: str = Depends(get_current_user)):
+    try:
+        res = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0:
+            sessions = [s.strip() for s in res.stdout.splitlines() if s.strip()]
+            if "dashboard" not in sessions:
+                sessions.insert(0, "dashboard")
+            return {"sessions": sessions}
+        return {"sessions": ["dashboard"]}
+    except Exception as e:
+        logger.warning("Failed to list tmux sessions: %s", e)
+        return {"sessions": ["dashboard"]}
 
 @router.websocket("/ws")
 async def proxy_ws(websocket: WebSocket):
@@ -46,9 +64,15 @@ async def proxy_ws(websocket: WebSocket):
     subprotocol = websocket.headers.get("sec-websocket-protocol")
     subprotocols = [s.strip() for s in subprotocol.split(",")] if subprotocol else None
     await websocket.accept(subprotocol=subprotocols[0] if subprotocols else None)
+
+    query = str(websocket.query_params)
+    ttyd_url = f"ws://127.0.0.1:{TTYD_PORT}/ws"
+    if query:
+        ttyd_url += f"?{query}"
+
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{TTYD_PORT}/ws",
+            ttyd_url,
             subprotocols=subprotocols
         ) as ws:
             async def fwd():
