@@ -111,5 +111,5 @@ stunnel:
 xui_panel:
   url: "https://127.0.0.1:57001/3x-ui/"
   username: "root"
-  password: "${XRAY_PASS}"
+  password: "${DASH_PASS}"
 

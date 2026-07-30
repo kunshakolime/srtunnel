@@ -18,7 +18,7 @@ if [[ ! -f config.yaml ]]; then
     MY_SPEED="${MY_SPEED:-100 Mbps}"
     export IFACE SSH H1_PR H2_PR ZU_PR UC_PR HTTP HTTPS MY_SPEED \
         TOKEN="" DOMAIN="" SLOWDNSDOMAIN="sd.test.local" \
-        CF_ROOT_DOMAIN="" CF_TOKEN="" CF_ZONE="" XRAY_PASS=""
+        CF_ROOT_DOMAIN="" CF_TOKEN="" CF_ZONE="" DASH_PASS=""
     envsubst < config.template.yaml > config.yaml
     echo "Done. Edit config.yaml to taste."
 fi

@@ -15,7 +15,7 @@ AS THE ROOT USER:
 ```bash
 export TOKEN="your_telegram_token_here" \
        DOMAIN="your_domain_or_subdomain.com" \
-       XRAY_PASS="3x-ui-dashboard-pass" \
+       DASH_PASS="3x-ui-dashboard-pass" \
        HTTP="" \
        HTTPS="" \
        IFACE="" \
