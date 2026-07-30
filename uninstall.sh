@@ -88,7 +88,7 @@ fi
 
 # ── Remove Installed Packages ─────────────────────────────────────────────────
 echo ""
-echo "[6/7] Removing installed packages..."
+echo "[6/8] Removing installed packages..."
 
 if confirm "  Remove packages installed by the setup script? (stunnel4, nginx, nftables, etc.)"; then
     apt remove -y --purge \
@@ -101,9 +101,28 @@ else
     echo "  Skipping package removal."
 fi
 
+# ── Remove Let's Encrypt Certificates ──────────────────────────────────────────
+echo ""
+echo "[7/8] Removing Let's Encrypt certificates..."
+
+if [[ -d /etc/letsencrypt/live ]]; then
+    echo "  Existing certificates found:"
+    for c in /etc/letsencrypt/live/*/; do
+        echo "    - $(basename "$c")"
+    done
+    if confirm "  Remove all Let's Encrypt certificates and cleanup?"; then
+        rm -rf /etc/letsencrypt
+        echo "  Certificates removed."
+    else
+        echo "  Skipping certificate removal."
+    fi
+else
+    echo "  No Let's Encrypt certificates found."
+fi
+
 # ── Remove Bot Directory ──────────────────────────────────────────────────────
 echo ""
-echo "[7/7] Removing srtunnel directory..."
+echo "[8/8] Removing srtunnel directory..."
 
 if [[ -d "$BOT_DIR" ]]; then
     if confirm "  Delete $BOT_DIR and all its contents?"; then
