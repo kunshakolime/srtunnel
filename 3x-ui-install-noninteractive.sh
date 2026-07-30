@@ -102,7 +102,8 @@ config_after_install() {
         if [[ "$existing_hasDefaultCredential" == "true" ]]; then
             local config_webBasePath="${WEBPATH:-3x-ui}"
             local config_username="${USER:-root}"
-            local config_password="${PASS:-${DASH_PASS:-}}"
+            local config_password="${DASH_PASS:-}"
+            [[ -n "${PASS:-}" ]] && config_password="$PASS"
 
             if [[ "${CUSTOMIZE_PORT:-y}" == "y" || "${CUSTOMIZE_PORT:-y}" == "Y" ]]; then
                 if [[ -n "${PANEL_PORT}" ]]; then
