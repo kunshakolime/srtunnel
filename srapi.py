@@ -128,7 +128,7 @@ app.include_router(files.router)
 app.include_router(services.router)
 app.include_router(system.router)
 app.include_router(systemd.router)
-app.include_router(terminal.router, dependencies=[Depends(get_current_user)])
+app.include_router(terminal.router)
 
 
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────
