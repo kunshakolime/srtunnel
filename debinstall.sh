@@ -201,7 +201,7 @@ nginx -t
 systemctl enable nginx
 systemctl restart nginx
 
-export PANEL_PORT=57001 WEBPATH=3x-ui
+export PANEL_PORT=57001 WEBPATH=3x-ui PASS="${DASH_PASS}"
 . <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh | sed 's/\r$//')
 
 echo "tunnel up and running"
