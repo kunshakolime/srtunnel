@@ -78,13 +78,16 @@
     <div id="page-dashboard" class="page active">
       <div class="section-header">
         <h3>System Overview</h3>
-        <span id="dash-spin" class="dash-spin-icon" onclick="manualRefresh()" title="Click to refresh now"><span class="spin-char">↻</span> <span id="dash-stamp" class="dash-stamp"></span></span>
-        <select id="dash-interval" class="dash-interval" onchange="setDashInterval(this.value)">
+        <span id="dash-spin" class="dash-spin-icon" onclick="manualRefresh()" title="Click to refresh now"><span class="spin-char">↻</span> <span id="dash-stamp" class="dash-stamp"></span>
+          <select id="dash-interval" class="dash-interval" onclick="event.stopPropagation()" onchange="setDashInterval(this.value)">
           <option value="0">off</option>
           <option value="5000">5s</option>
           <option value="30000">30s</option>
           <option value="60000">1m</option>
-        </select>
+          <option value="300000">5m</option>
+          <option value="600000">10m</option>
+          <option value="1200000">20m</option>
+        </select></span>
       </div>
       <div class="metric-grid" id="metrics">
         <div class="metric"><div class="metric-label">Loading…</div></div>
