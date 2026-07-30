@@ -86,24 +86,9 @@ if command -v nginx &>/dev/null && nginx -t 2>/dev/null; then
     systemctl restart nginx || true
 fi
 
-# ── Remove TLS Certificates ───────────────────────────────────────────────────
-echo ""
-echo "[6/8] Handling TLS certificates..."
-
-if confirm "  Remove Let's Encrypt certificates (certbot)?"; then
-    if command -v certbot &>/dev/null; then
-        certbot delete --non-interactive 2>/dev/null || true
-        echo "  Certbot certs removed."
-    else
-        echo "  certbot not found, skipping."
-    fi
-else
-    echo "  Skipping Let's Encrypt certificate removal."
-fi
-
 # ── Remove Installed Packages ─────────────────────────────────────────────────
 echo ""
-echo "[7/8] Removing installed packages..."
+echo "[6/7] Removing installed packages..."
 
 if confirm "  Remove packages installed by the setup script? (stunnel4, nginx, nftables, etc.)"; then
     apt remove -y --purge \
@@ -118,7 +103,7 @@ fi
 
 # ── Remove Bot Directory ──────────────────────────────────────────────────────
 echo ""
-echo "[8/8] Removing srtunnel directory..."
+echo "[7/7] Removing srtunnel directory..."
 
 if [[ -d "$BOT_DIR" ]]; then
     if confirm "  Delete $BOT_DIR and all its contents?"; then
@@ -140,5 +125,4 @@ echo ""
 echo "You may want to manually review:"
 echo "  - /etc/shells          (may still contain /sbin/nologin)"
 echo "  - /etc/stunnel/        (any remaining stunnel configs)"
-echo "  - /etc/letsencrypt/    (if certs were not removed above)"
 echo "  - Firewall/nftables rules if any were added separately"
