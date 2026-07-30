@@ -563,6 +563,7 @@ let _terminalLoaded = false;
 function loadTerminal() {
   if (_terminalLoaded) return;
   _terminalLoaded = true;
+  const token = TOKEN || localStorage.getItem('home_token') || '';
   const el = document.getElementById('terminal-body');
-  el.innerHTML = `<iframe src="/api/terminal/" style="width:100%;height:100%;border:none;background:#000"></iframe>`;
+  el.innerHTML = `<iframe src="/api/terminal/?token=${encodeURIComponent(token)}" style="width:100%;height:100%;border:none;background:#000"></iframe>`;
 }

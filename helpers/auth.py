@@ -1,7 +1,8 @@
 import pam, json
 from pathlib import Path
 from jose import jwt, JWTError
-from fastapi import HTTPException, Depends
+from typing import Optional
+from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 
@@ -15,7 +16,7 @@ ALGORITHM  = "HS256"
 
 TOKENS_FILE = Path(__file__).resolve().parent / "tokens.json"
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 # ── tokens.json helpers ───────────────────────────────────────────────────────
 # Format: [ { "token": "...", "label": "my laptop", "user": "root", "created": "..." } ]
@@ -64,14 +65,31 @@ def create_token(username: str) -> str:
     raw = jwt.encode({"sub": username}, SECRET_KEY, algorithm=ALGORITHM)
     return raw
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    raw = credentials.credentials
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    raw = None
+    if credentials and credentials.credentials:
+        raw = credentials.credentials
+    elif "token" in request.query_params:
+        raw = request.query_params["token"]
+    elif "access_token" in request.cookies:
+        raw = request.cookies.get("access_token")
+    elif "x-token" in request.headers:
+        raw = request.headers.get("x-token")
+
+    if not raw:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     try:
         payload = jwt.decode(raw, SECRET_KEY, algorithms=[ALGORITHM],
                              options={"verify_exp": False})
         username = payload.get("sub")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    if _is_revoked(raw):
+
+    if not username or _is_revoked(raw):
         raise HTTPException(status_code=401, detail="Token revoked")
+
     return username
