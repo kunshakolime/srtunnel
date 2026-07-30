@@ -131,7 +131,7 @@ app.include_router(systemd.router)
 
 @app.api_route("/3x-ui/{path:path}", methods=["GET","POST","PUT","DELETE","PATCH","OPTIONS","HEAD"])
 async def proxy_3xui(request: Request, path: str):
-    target = f"http://127.0.0.1:51701/3x-ui/{path}"
+    target = f"http://127.0.0.1:57001/3x-ui/{path}"
     body = await request.body()
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")}
     async with httpx.AsyncClient(verify=False) as client:
