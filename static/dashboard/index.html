@@ -66,7 +66,6 @@
       <button onclick="showPage('files',this)">Files</button>
     </div>
     <div class="top-right">
-      <span id="refreshStamp" class="refresh-stamp" onclick="manualRefresh()" title="Click to refresh now"></span>
       <button class="btn-sm" id="tokenCopyBtn" onclick="copySessionToken()" title="Copy your session token">copy token</button>
       <span id="topUser"></span>
     </div>
@@ -79,7 +78,7 @@
     <div id="page-dashboard" class="page active">
       <div class="section-header">
         <h3>System Overview</h3>
-        <span id="dash-spin" class="dash-spin-icon">↻</span>
+        <span id="dash-spin" class="dash-spin-icon" onclick="manualRefresh()" title="Click to refresh now"><span class="spin-char">↻</span> <span id="dash-stamp" class="dash-stamp"></span></span>
       </div>
       <div class="metric-grid" id="metrics">
         <div class="metric"><div class="metric-label">Loading…</div></div>

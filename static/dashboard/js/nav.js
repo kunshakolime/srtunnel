@@ -73,7 +73,7 @@ function manualRefresh() {
   if (loader) loader();
 }
 
-// ── Last-refresh stamp ────────────────────────────────────────────────────────
+// ── Last-refresh stamp (in dash-spin) ─────────────────────────────────────────
 
 let _lastRefresh = null;
 let _stampTimer  = null;
@@ -85,7 +85,7 @@ function markRefresh() {
 
 function _updateStamp() {
   clearInterval(_stampTimer);
-  const el = document.getElementById('refreshStamp');
+  const el = document.getElementById('dash-stamp');
   if (!el) return;
   const update = () => {
     if (!_lastRefresh) { el.textContent = ''; return; }
