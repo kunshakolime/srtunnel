@@ -340,5 +340,3 @@ def _server_monitor_loop():
 def start_server_monitor():
     t = threading.Thread(target=_server_monitor_loop, daemon=True)
     t.start()
-
-start_server_monitor()
