@@ -159,7 +159,6 @@ if [[ -n "$DOMAIN" ]]; then
         --standalone \
         --non-interactive --agree-tos --register-unsafely-without-email \
         --expand \
-        --force-renewal \
         "${DOMAIN_ARGS[@]}"; then
 
         LIVE="/etc/letsencrypt/live/$DOMAIN"
