@@ -121,8 +121,11 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 /* ── SECTION HEADER ── */
 .section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
 .section-header h3{font-size:16px;font-weight:600}
-.dash-spin-icon{font-size:15px;cursor:default;opacity:.4;transition:opacity .2s}
-.dash-spin-icon.spinning{opacity:1;animation:dashSpin .6s linear infinite}
+.dash-spin-icon{display:inline-flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;opacity:.4;transition:opacity .2s;user-select:none}
+.dash-spin-icon:hover{opacity:.7}
+.dash-spin-icon.spinning{opacity:1}
+.dash-spin-icon.spinning .spin-char{animation:dashSpin .6s linear infinite}
+.dash-stamp{font-family:var(--font-mono);font-size:11px;color:var(--text3);min-width:50px;text-align:right}
 @keyframes dashSpin{to{transform:rotate(360deg)}}
 .hdr-actions{display:flex;gap:8px}
 
@@ -247,14 +250,7 @@ select option{background:var(--bg3)}
 /* ── CONNECTIONS LIVE ── */
 .connections-val{font-family:var(--font-mono);font-size:14px;color:var(--green)}
 
-/* ── REFRESH STAMP ── */
-.refresh-stamp{
-  font-family:var(--font-mono);font-size:11px;color:var(--text3);
-  cursor:pointer;padding:4px 8px;border-radius:6px;transition:.15s;
-  border:1px solid var(--border2);background:var(--bg3);
-  user-select:none;
-}
-.refresh-stamp:hover{color:var(--text1);border-color:var(--accent);background:var(--bg4)}
+
 
 /* ── MISC ── */
 code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-radius:5px;font-size:12px}
