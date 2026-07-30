@@ -101,13 +101,12 @@ async function loadServices() {
               <option value="enable"  ${s.status==='enable' ?'selected':''}>run once</option>
               <option value="disable" ${s.status==='disable'?'selected':''}>disabled</option>
             </select>
-            ${s.running ? `<button class="btn-sm" style="font-size:11px" onclick="toggleLog('${s.name}')" id="logbtn-${s.name}">${logOpen ? '▲ Hide Log' : '▼ Log'}</button>` : ''}
+            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('${s.name}')" id="logbtn-${s.name}">${logOpen ? '▲ Hide Log' : '▼ Log'}</button>
           </div>
         </div>
-        ${s.running ? `
           <div id="log-${s.name}" style="display:${logOpen ? 'block' : 'none'};margin-top:12px">
             <pre style="background:var(--bg1);border-radius:8px;padding:12px;font-size:11px;font-family:var(--font-mono);color:var(--text2);overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;margin:0">${escHtml(logLines)}</pre>
-          </div>` : ''}
+          </div>
       </div>`;
   }).join('');
   filterServices();

@@ -232,7 +232,7 @@ class _Watcher:
                 "name":    s.name,
                 "status":  s.status,
                 "running": s.running,
-                "log":     _capture_log(s.name, lines) if s.running else [],
+                "log":     _capture_log(s.name, lines),
             })
         return result
 
