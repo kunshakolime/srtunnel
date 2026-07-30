@@ -59,6 +59,7 @@
       <button onclick="showPage('users',this)">Users</button>
       <button onclick="showPage('xray',this)">Xray</button>
       <button onclick="showPage('services',this)">Services</button>
+      <button onclick="showPage('terminal',this)">Terminal</button>
       <button onclick="showPage('dns',this)">DNS</button>
       <button onclick="showPage('backup',this)">Backup</button>
       <button onclick="showPage('scope',this)">Scope</button>
@@ -172,6 +173,12 @@
         </div>
       </div>
       <div id="servicesList"></div>
+    </div>
+
+    <!-- TERMINAL -->
+    <div id="page-terminal" class="page">
+      <div class="section-header"><h3>Terminal</h3></div>
+      <div id="terminal-body" style="height:calc(100vh - 240px);border-radius:12px;overflow:hidden;background:#000"></div>
     </div>
 
     <!-- DNS -->

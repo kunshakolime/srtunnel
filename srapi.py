@@ -7,7 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -54,6 +54,7 @@ async def lifespan(app: FastAPI):
         svc_helper.start_server_monitor()
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
         run_launch_commands()
+        terminal.start()
     except Exception as e:
         logger.critical("startup failed: %s — %s", type(e).__name__, e)
         logger.critical(traceback.format_exc())
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("srapi shutting down")
     svc_helper.watcher.stop()
+    terminal.stop()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -116,7 +118,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
-from routes import auth, users, xray, files, services, system, systemd
+from routes import auth, users, xray, files, services, system, systemd, terminal
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -125,6 +127,7 @@ app.include_router(files.router)
 app.include_router(services.router)
 app.include_router(system.router)
 app.include_router(systemd.router)
+app.include_router(terminal.router, dependencies=[Depends(CurrentUser)])
 
 
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────
