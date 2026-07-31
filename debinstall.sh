@@ -197,6 +197,10 @@ EOF
 
 ln -sf /opt/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
 
+# ── Dashboard admin group ─────────────────────────────────────────────────────
+groupadd -f srtadmin
+usermod -aG srtadmin root
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now srapi

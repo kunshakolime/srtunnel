@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 import secrets, logging
 
-from helpers.auth import verify_linux_login, create_token, store_token, revoke_token, list_tokens
+from helpers.auth import verify_linux_login, user_in_group, create_token, store_token, revoke_token, list_tokens
 from deps import CurrentUser
 
 logger = logging.getLogger("srapi.auth")
@@ -32,8 +32,8 @@ def login(data: LoginRequest):
     if not verify_linux_login(data.username, data.password):
         logger.warning("Failed login attempt for user: %s", data.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if data.username != "root":
-        raise HTTPException(status_code=403, detail="Only root is allowed")
+    if not user_in_group(data.username, "srtadmin"):
+        raise HTTPException(status_code=403, detail="User not in srtadmin group")
     label = data.label or f"dashboard-{secrets.token_hex(4)}"
     token = create_token(data.username)
     store_token(token, data.username, label)
