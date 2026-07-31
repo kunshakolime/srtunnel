@@ -62,6 +62,14 @@ def verify_linux_login(username: str, password: str) -> bool:
     p = pam.pam()
     return p.authenticate(username, password)
 
+def user_in_group(username: str, group: str) -> bool:
+    import grp
+    try:
+        g = grp.getgrnam(group)
+        return username in g.gr_mem
+    except KeyError:
+        return False
+
 def create_token(username: str) -> str:
     # No exp claim — tokens never expire; revocation is via tokens.json
     raw = jwt.encode({"sub": username}, SECRET_KEY, algorithm=ALGORITHM)
