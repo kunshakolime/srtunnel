@@ -491,7 +491,7 @@ async function loadXray() {
               ${allInboundUsers.length ? allInboundUsers.map(u => `
                 <tr class="${u.inDb ? '' : 'row-dimmed'}">
                   <td><strong style="font-family:var(--font-mono)">${u.email}</strong></td>
-                  <td style="font-family:var(--font-mono);font-size:11px" title="${u.id}">${u.id ? u.id.substring(0,8) + '...' : '—'}</td>
+                  <td style="font-family:var(--font-mono);font-size:11px" title="${u.uuid || u.id}">${u.uuid ? u.uuid.substring(0,8)+'...' : String(u.id || '—')}</td>
                   <td><span class="badge">${u.inbound}</span></td>
                   <td><span class="badge ${u.inDb ? 'badge-active' : 'badge-inactive'}">${u.inDb ? 'Known' : 'Unknown'}</span></td>
                   <td>
