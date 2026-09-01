@@ -1,4 +1,8 @@
-import pam, json
+import json
+try:
+    import pam as _pam
+except ImportError:
+    import PAM as _pam
 from pathlib import Path
 from jose import jwt, JWTError
 from typing import Optional
@@ -59,7 +63,7 @@ def list_tokens() -> list:
 # ── core auth ─────────────────────────────────────────────────────────────────
 
 def verify_linux_login(username: str, password: str) -> bool:
-    p = pam.pam()
+    p = _pam.pam()
     return p.authenticate(username, password)
 
 def user_in_group(username: str, group: str) -> bool:
