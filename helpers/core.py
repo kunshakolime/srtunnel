@@ -148,7 +148,7 @@ def sync():
     # ── ZiVPN ─────────────────────────────────────────────────────────────────
     zivpn_passwords = [d["password"] for d in zivpn_active.values()]
     zivpn_ok = zivpn.set_passwords(
-        _c("CONFIG_FILE", "./zivpn.json"),
+        _c("CONFIG_FILE", "./configs/zivpn.json"),
         zivpn_passwords,
         _c("DEFAULT_PASSWORD", "123"),
     )

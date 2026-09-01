@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml, logging
 
 from helpers import services as svc_helper
-from deps import CurrentUser
+from helpers.deps import CurrentUser
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -24,7 +24,10 @@ class ServiceStatusRequest(BaseModel):
 def list_services(lines: int = 10, user: CurrentUser = None):
     services = svc_helper.watcher.list_services(lines=lines) or []
     try:
-        raw      = yaml.safe_load((_BASE_DIR / "config.yaml").read_text()) or {}
+        _cfg = _BASE_DIR / "configs" / "config.yaml"
+        if not _cfg.exists():
+            _cfg = _BASE_DIR / "config.yaml"
+        raw      = yaml.safe_load(_cfg.read_text()) or {}
         block    = raw.get("manager", {})
         keep_set   = set(block.get("keep",   []) or [])
         enable_set = set(block.get("enable", []) or [])

@@ -4,8 +4,13 @@ set -e
 BOT_DIR="/opt/srtunnel"
 REPO="https://raw.githubusercontent.com/kunshakolime/srtunnel/main/"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# repo root is parent of scripts/ when installed from clone
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "$SCRIPT_DIR")"
 
-if [[ -f "$SCRIPT_DIR/config.template.yaml" && -f "$SCRIPT_DIR/srapi.py" ]]; then
+if [[ -f "$REPO_ROOT/configs/config.template.yaml" && -f "$REPO_ROOT/srapi.py" ]]; then
+    BOT_DIR="$REPO_ROOT"
+    echo "Detected existing repo at $BOT_DIR — skipping clone."
+elif [[ -f "$SCRIPT_DIR/configs/config.template.yaml" && -f "$SCRIPT_DIR/srapi.py" ]]; then
     BOT_DIR="$SCRIPT_DIR"
     echo "Detected existing repo at $BOT_DIR — skipping clone."
 fi
@@ -41,40 +46,43 @@ if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
 fi
 cd "$BOT_DIR"
-mv ./bin/deb13amd64/* ./ 2>/dev/null || true
-rm -rf ./bin/ 2>/dev/null || true
+mkdir -p bin configs
+# binaries are in bin/deb13amd64 — keep them in bin/
+mv ./bin/deb13amd64/* ./bin/ 2>/dev/null || true
+rmdir ./bin/deb13amd64 2>/dev/null || true
+chmod +x ./bin/* 2>/dev/null || true
 chmod +x ./* 2>/dev/null || true
 
-mv ./badvpn-udpgw64 ./badvpn-udpgw 2>/dev/null || true
-mv ./udp-zivpn-linux-amd64 ./udp-zivpn 2>/dev/null || true
-mv ./udp-custom-linux-amd64 ./udp-custom 2>/dev/null || true
-mv ./hysteria-linux-amd64-v1.3.5 ./hysteria1 2>/dev/null || true
-mv ./hysteria-linux-amd64-v2.7.0 ./hysteria2 2>/dev/null || true
+mv ./bin/badvpn-udpgw64 ./bin/badvpn-udpgw 2>/dev/null || true
+mv ./bin/udp-zivpn-linux-amd64 ./bin/udp-zivpn 2>/dev/null || true
+mv ./bin/udp-custom-linux-amd64 ./bin/udp-custom 2>/dev/null || true
+mv ./bin/hysteria-linux-amd64-v1.3.5 ./bin/hysteria1 2>/dev/null || true
+mv ./bin/hysteria-linux-amd64-v2.7.0 ./bin/hysteria2 2>/dev/null || true
 
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"   geoip.dat
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat" geosite.dat
 
-ln -sf "$BOT_DIR/srtunnel" /usr/sbin/srtunnel
+ln -sf "$BOT_DIR/bin/srtunnel" /usr/sbin/srtunnel
 
 # ── SSH tweak ─────────────────────────────────────────────────────────────
 sshd_ensure(){ grep -qF "$1" /etc/ssh/sshd_config || echo "$1" >> /etc/ssh/sshd_config; }
 cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 sshd_ensure "KexAlgorithms +diffie-hellman-group14-sha1"
-sshd_ensure "Banner $BOT_DIR/bannerssh"
+sshd_ensure "Banner $BOT_DIR/configs/bannerssh"
 sshd_ensure "UsePAM yes"
 echo "/sbin/nologin" >> /etc/shells
 systemctl reload sshd || true
 
 # ── Render Config (hardwired) ───────────────────────────────────────────────
-cp config.template.yaml config.yaml
-cp xray.template.json xray.json
-echo "Hardwired config copied to config.yaml / xray.json — edit manually if needed."
+cp configs/config.template.yaml configs/config.yaml
+cp configs/xray.template.json configs/xray.json
+echo "Hardwired config copied to configs/config.yaml / configs/xray.json — edit manually if needed."
 
-# nginx setup moved to ./setup-nginx.sh — run it separately if needed
+# nginx setup moved to scripts/setup-nginx.sh — run it separately if needed
 # (keeps debinstall minimal; dependencies still installed via apt)
 
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
-./dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
+./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
 
 cat > /etc/systemd/system/srapi.service << 'EOF'
 [Unit]
@@ -93,7 +101,7 @@ Environment=HOME=/root
 WantedBy=multi-user.target
 EOF
 
-#ln -sf /opt/srtunnel/stunnel.conf /etc/stunnel/stunnel.conf
+ln -sf /opt/srtunnel/configs/stunnel.conf /etc/stunnel/stunnel.conf 2>/dev/null || true
 
 # ── Dashboard admin group ─────────────────────────────────────────────────────
 groupadd -f srtadmin 2>/dev/null || true
@@ -103,4 +111,4 @@ usermod -aG srtadmin root 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable --now srapi 2>/dev/null || true
 
-echo "tunnel up and running (nginx not configured — run ./setup-nginx.sh if needed)"
+echo "tunnel up and running (nginx not configured — run ./scripts/setup-nginx.sh if needed)"

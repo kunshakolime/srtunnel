@@ -17,7 +17,7 @@ import httpx, yaml, logging, traceback, time
 from helpers import core, dns, monitor
 from helpers import services as svc_helper
 from helpers.auth import get_current_user
-from deps import cfg
+from helpers.deps import cfg
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -33,7 +33,9 @@ logger = logging.getLogger("srapi")
 
 def run_launch_commands():
     import subprocess
-    path = BASE_DIR / "config.yaml"
+    path = BASE_DIR / "configs" / "config.yaml"
+    if not path.exists():
+        path = BASE_DIR / "config.yaml"
     if not path.exists():
         return
     block = (yaml.safe_load(path.read_text()) or {}).get("manager", {})
@@ -138,7 +140,10 @@ _XUI_PANEL_CFG = None
 def _get_xui_cfg():
     global _XUI_PANEL_CFG
     if _XUI_PANEL_CFG is None:
-        raw = (yaml.safe_load((BASE_DIR / "config.yaml").read_text()) or {})
+        _cfg_path = BASE_DIR / "configs" / "config.yaml"
+        if not _cfg_path.exists():
+            _cfg_path = BASE_DIR / "config.yaml"
+        raw = (yaml.safe_load(_cfg_path.read_text()) or {})
         _XUI_PANEL_CFG = raw.get("xui_panel") or {}
     return _XUI_PANEL_CFG
 
