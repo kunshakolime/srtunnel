@@ -48,10 +48,10 @@
           ],
           "minVersion": "1.2",
           "maxVersion": "1.3",
-          "serverName": "${DOMAIN}"
+          "serverName": "example.com"
         },
         "wsSettings": {
-          "host": "${DOMAIN}",
+          "host": "example.com",
           "path": "/kun"
         }
       },
