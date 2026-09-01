@@ -41,7 +41,7 @@ if ! command -v speedtest &>/dev/null; then
     apt update -qq
     apt install -y -qq speedtest
 fi
-apt install -y -qq git openssh-server stunnel4 python3 python3-venv tmux gettext-base python3-psutil curl openssl nano nftables iptables libpam0g-dev nginx libnginx-mod-stream
+apt install -y -qq git openssh-server stunnel4 python3 python3-venv python3-certbot tmux gettext-base python3-psutil curl openssl nano nftables iptables libpam0g-dev nginx libnginx-mod-stream
 
 if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
@@ -207,12 +207,5 @@ systemctl enable --now srapi
 nginx -t
 systemctl enable nginx
 systemctl restart nginx
-
-export PANEL_PORT=57001 WEBPATH=3x-ui PASS="${DASH_PASS}"
-if [[ -f "$BOT_DIR/3x-ui-install-noninteractive.sh" ]]; then
-    . "$BOT_DIR/3x-ui-install-noninteractive.sh"
-else
-    . <(curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/3x-ui-install-noninteractive.sh | sed 's/\r$//')
-fi
 
 echo "tunnel up and running"
