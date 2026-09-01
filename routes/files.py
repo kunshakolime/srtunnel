@@ -5,7 +5,7 @@ from typing import Optional
 import os, logging
 
 from helpers import files
-from deps import CurrentUser
+from helpers.deps import CurrentUser
 
 logger = logging.getLogger("srapi.files")
 router = APIRouter(prefix="/api/files")

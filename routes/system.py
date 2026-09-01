@@ -6,7 +6,7 @@ from pathlib import Path
 import logging, traceback
 
 from helpers import monitor, dns, speedtest as st, services as svc_helper
-from deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
+from helpers.deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 

@@ -1,7 +1,7 @@
 import sys, json
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from typing import Annotated, Optional, Dict
@@ -14,13 +14,16 @@ CurrentUser = Annotated[str, Depends(get_current_user)]
 
 def load_config():
     import yaml
-    path = BASE_DIR / "config.yaml"
+    # support both old root and new configs/ location
+    path = BASE_DIR / "configs" / "config.yaml"
+    if not path.exists():
+        path = BASE_DIR / "config.yaml"
     if not path.exists():
         raise RuntimeError(f"Missing config file: {path}")
     app = (yaml.safe_load(path.read_text()) or {}).get("telegram_bot", {})
     return {
         "DB_FILE":          app.get("db_file", "users.db"),
-        "CONFIG_FILE":      app.get("config_file", "./zivpn.json"),
+        "CONFIG_FILE":      app.get("config_file", "./configs/zivpn.json"),
         "DEFAULT_PASSWORD": app.get("default_password", "123"),
         "DOMAIN":           app.get("domain", ""),
         "DNSTT":            app.get("dnstt", ""),
@@ -30,9 +33,9 @@ def load_config():
         "CF_ZONE":          app.get("cf_zone", ""),
         "CF_ROOT_DOMAIN":   app.get("cf_root_domain", ""),
         "XRAY_INBOUND_TAG": app.get("xray_inbound_tag", "xray-vless"),
-        "XRAY_CONFIG":      app.get("xray_config", str(BASE_DIR / "xray.json")),
+        "XRAY_CONFIG":      app.get("xray_config", str(BASE_DIR / "configs" / "xray.json")),
         "XRAY_API_PORT":    app.get("xray_api_port", 10085),
-        "XRAY_BINARY":      app.get("xray_binary", str(BASE_DIR / "xray")),
+        "XRAY_BINARY":      app.get("xray_binary", str(BASE_DIR / "bin" / "xray")),
     }
 
 cfg = load_config()

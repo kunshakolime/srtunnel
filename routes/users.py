@@ -4,7 +4,7 @@ from typing import Optional
 import logging
 
 from helpers import core, xray2 as xray, monitor
-from deps import CurrentUser, load_scope
+from helpers.deps import CurrentUser, load_scope
 import requests as http_requests
 
 logger = logging.getLogger("srapi.users")

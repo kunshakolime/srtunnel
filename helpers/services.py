@@ -17,7 +17,12 @@ from ruamel.yaml import YAML
 
 # ── constants ────────────────────────────────────────────────────────────────
 
-CONFIG_FILE        = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_FILE        = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+# fallback for old installs where config.yaml is still at root
+if not CONFIG_FILE.exists():
+    _fallback = Path(__file__).resolve().parent.parent / "config.yaml"
+    if _fallback.exists():
+        CONFIG_FILE = _fallback
 TMUX_BLOCK         = "manager"
 KEEPALIVE_INTERVAL = 2   # seconds between keep-alive checks
 
@@ -107,8 +112,10 @@ def _start_session(s: Service):
     log_file.write_text("")  # clear old log
     cmd = ["tmux", "new-session", "-d", "-s", s.name,
            "bash", "-c", f"script -q --flush -e -c {shlex.quote(s.command)} {shlex.quote(str(log_file))} 2>/dev/null"]
+    # run from project root so relative ./bin/* and ./configs/* work
+    _cwd = str(CONFIG_FILE.parent.parent if CONFIG_FILE.parent.name == "configs" else CONFIG_FILE.parent)
     r = subprocess.run(
-        cmd, cwd=str(CONFIG_FILE.parent),
+        cmd, cwd=_cwd,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     if r.returncode != 0:

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 import logging
 
 from helpers import systemd
-from deps import CurrentUser
+from helpers.deps import CurrentUser
 
 logger = logging.getLogger("srapi.systemd")
 router = APIRouter(prefix="/api/systemd")

@@ -22,7 +22,10 @@ def _ensure_config():
     global _cfg, _SESSION, _BASE
     if _cfg is not None:
         return
-    raw = yaml.safe_load(open(_BASE_DIR / "config.yaml")) or {}
+    _cfg_path = _BASE_DIR / "configs" / "config.yaml"
+    if not _cfg_path.exists():
+        _cfg_path = _BASE_DIR / "config.yaml"
+    raw = yaml.safe_load(open(_cfg_path)) or {}
     panel = raw.get("xui_panel") or {}
     if not panel.get("url") or not panel.get("token"):
         raise RuntimeError("xui_panel.url and xui_panel.token are required in config.yaml")

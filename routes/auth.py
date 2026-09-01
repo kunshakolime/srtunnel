@@ -4,7 +4,7 @@ from typing import Optional
 import secrets, logging
 
 from helpers.auth import verify_linux_login, user_in_group, create_token, store_token, revoke_token, list_tokens
-from deps import CurrentUser
+from helpers.deps import CurrentUser
 
 logger = logging.getLogger("srapi.auth")
 router = APIRouter(prefix="/api")
