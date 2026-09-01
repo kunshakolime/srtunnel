@@ -17,7 +17,7 @@ manager:
     srapi: ./srapi.py
     telegram_bot: ./bin/telegram_bot
     pystunnel: ./bin/pystunnel
-    websocket: ./bin/websocket
+    websocket: ./bin/websocket -c configs/config.yaml
     dropbear: ./bin/dropbear -EFR -p 127.0.0.1:23 -W 65536 -b /opt/srtunnel/configs/bannerssh
     badvpn: ./bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 1000 --client-socket-sndbuf 0 --udp-mtu 9000
     zivpn: ./bin/udp-zivpn server -c configs/zivpn.json
