@@ -1,8 +1,14 @@
 import json
 try:
     import pam as _pam
+    _PAM_OK = True
 except ImportError:
-    import PAM as _pam
+    try:
+        import PAM as _pam
+        _PAM_OK = False
+    except ImportError:
+        _pam = None
+        _PAM_OK = False
 from pathlib import Path
 from jose import jwt, JWTError
 from typing import Optional
@@ -63,8 +69,35 @@ def list_tokens() -> list:
 # ── core auth ─────────────────────────────────────────────────────────────────
 
 def verify_linux_login(username: str, password: str) -> bool:
-    p = _pam.pam()
-    return p.authenticate(username, password)
+    if _pam is None:
+        return False
+    if _PAM_OK:
+        # high-level python3-pam (C module exposing `pam`)
+        p = _pam.pam()
+        return p.authenticate(username, password)
+    # Debian python3-pam: low-level PAM wrapper
+    def conv(auth, query_list, userData=None):
+        resp = []
+        for _, qtype in query_list:
+            if qtype == _pam.PAM_PROMPT_ECHO_ON:
+                resp.append((username, 0))
+            elif qtype == _pam.PAM_PROMPT_ECHO_OFF:
+                resp.append((password, 0))
+            else:
+                resp.append(("", 0))
+        return resp
+    try:
+        auth = _pam.pam()
+        auth.start("passwd")
+        auth.set_item(_pam.PAM_USER, username)
+        auth.set_item(_pam.PAM_CONV, conv)
+        auth.authenticate()
+        auth.acct_mgmt()
+        return True
+    except _pam.error:
+        return False
+    except Exception:
+        return False
 
 def user_in_group(username: str, group: str) -> bool:
     import grp
