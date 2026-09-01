@@ -3,15 +3,15 @@ manager:
   - echo \"Manager started at $(date)\" >> hello.txt
   - sysctl -w net.core.rmem_max=16777216
   - sysctl -w net.core.wmem_max=16777216
-  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${UC_PR} -j DNAT --to-destination :36712 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${UC_PR} -j DNAT --to-destination :36712
-  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${ZU_PR} -j DNAT --to-destination :5667 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${ZU_PR} -j DNAT --to-destination :5667
-  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${H2_PR} -j DNAT --to-destination :5668 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${H2_PR} -j DNAT --to-destination :5668
-  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport ${H1_PR} -j DNAT --to-destination :5669 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport ${H1_PR} -j DNAT --to-destination :5669
-  - iptables -t nat -C PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i ${IFACE} -p udp --dport 53 -j REDIRECT --to-port 8053
+  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 20000:30000 -j DNAT --to-destination :36712 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 20000:30000 -j DNAT --to-destination :36712
+  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 6000:19999 -j DNAT --to-destination :5667
+  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 3000:5999 -j DNAT --to-destination :5668 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 3000:5999 -j DNAT --to-destination :5668
+  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 1000:2999 -j DNAT --to-destination :5669 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 1000:2999 -j DNAT --to-destination :5669
+  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053
   - echo "starting..."
   - sleep 3
-  keep: [websocket, badvpn, udp-custom, slowdns, stunnel, tracker]
-  enable: [udp-rules]
+  keep: []
+  enable: []
   services:
     stunnel: stunnel
     srapi: ./srapi.py
@@ -24,37 +24,37 @@ manager:
     udp-custom: ./udp-custom -c udp-custom.json
     hysteria1: ./hysteria1 server --config hysteria1.json
     hysteria2: ./hysteria2 server --config hysteria2.yaml
-    slowdns: ./dnstt-server -udp :8053 -privkey-file slowdns.key ${SLOWDNSDOMAIN} 127.0.0.1:${SSH}
-    udp-rules: iptables -t nat -D PREROUTING -i ${IFACE} -p udp --dport 1:65535 -j DNAT --to-destination :36712
+    slowdns: ./dnstt-server -udp :8053 -privkey-file slowdns.key sd.example.com 127.0.0.1:22
+    # udp-rules: iptables -t nat -D PREROUTING -i eth0 -p udp --dport 1:65535 -j DNAT --to-destination :36712
     xray: ./xray run -config /opt/srtunnel/xray.json
     tracker: ./traffic_meter_user
 telegram_bot:
   db_file: "users.db"
   config_file: "./zivpn.json"
   default_password: "123"
-  token: "${TOKEN}"
+  token: ""                              # ← put your Telegram bot token here
   primary_url: "http://127.0.0.1:57000"
-  domain: "${DOMAIN}"
-  cf_root_domain: "${CF_ROOT_DOMAIN}"   # ← root domain for DNS management
-  cf_token: "${CF_TOKEN}"
-  cf_zone:  "${CF_ZONE}"
-  dnstt: "${SLOWDNSDOMAIN}"
+  domain: "example.com"                  # ← put your main domain here
+  cf_root_domain: "example.com"          # ← root domain for DNS management
+  cf_token: ""
+  cf_zone:  ""
+  dnstt: "sd.example.com"
   slowdnskey: "./slowdns.pub"
-  interface: "${IFACE}"
-  bandwidth_down: "${MY_SPEED}"
-  bandwidth_up: "${MY_SPEED}"
+  interface: "eth0"
+  bandwidth_down: "? Mbps"
+  bandwidth_up: "? Mbps"
   xray_config: "/opt/srtunnel/xray.json"
   xray_binary: "/opt/srtunnel/xray"
   xray_inbound_tag: "xray-vless"
 websocket:
   # WebSocket Tunnel Server Configuration
   ports: # Port Configuration
-    http: [${HTTP}]      # HTTP ports (plain text)
-    https: [${HTTPS}]                      # HTTPS ports (SSL/TLS)
+    http: [80, 8080, 8000, 8880]      # HTTP ports (plain text)
+    https: [8446]                      # HTTPS ports (SSL/TLS)
     enable_ssl: true                   # Enable HTTPS servers
   backend: # Backend Server (SSH, telnet, etc.)
     host: "127.0.0.1"
-    port: ${SSH}
+    port: 22
     max_retries: 3
     retry_delay: 0.5
   ssl:
@@ -97,7 +97,7 @@ stunnel:
     - name: https-main
       listen: 0.0.0.0:443
       default_backend:
-        - 127.0.0.1:${SSH}
+        - 127.0.0.1:22
       sni:
         example.com:
           - 127.0.0.1:8081
@@ -110,5 +110,4 @@ stunnel:
         - 127.0.0.1:7000
 xui_panel:
   url: "http://127.0.0.1:57001/3x-ui/"
-  token: "${DASH_PASS}"
-
+  token: "changeme"
