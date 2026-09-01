@@ -7,10 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # repo root is parent of scripts/ when installed from clone
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "$SCRIPT_DIR")"
 
-if [[ -f "$REPO_ROOT/configs/config.template.yaml" && -f "$REPO_ROOT/srapi.py" ]]; then
+if [[ -f "$REPO_ROOT/configs/config.template.yaml" && -f "$REPO_ROOT/app/srapi.py" ]]; then
     BOT_DIR="$REPO_ROOT"
     echo "Detected existing repo at $BOT_DIR — skipping clone."
-elif [[ -f "$SCRIPT_DIR/configs/config.template.yaml" && -f "$SCRIPT_DIR/srapi.py" ]]; then
+elif [[ -f "$SCRIPT_DIR/configs/config.template.yaml" && -f "$SCRIPT_DIR/app/srapi.py" ]]; then
     BOT_DIR="$SCRIPT_DIR"
     echo "Detected existing repo at $BOT_DIR — skipping clone."
 fi
@@ -42,7 +42,7 @@ pip install --break-system-packages "python-jose[cryptography]" 2>/dev/null \
  || pip3 install --break-system-packages "python-jose[cryptography]" 2>/dev/null \
  || echo "WARNING: python-jose not installed — JWT auth may fail" >&2
 
-if [[ "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
+if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
 fi
 cd "$BOT_DIR"
@@ -90,7 +90,7 @@ Description=srtunnel API
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /opt/srtunnel/srapi.py
+ExecStart=/usr/bin/python3 /opt/srtunnel/app/srapi.py
 WorkingDirectory=/opt/srtunnel
 Restart=always
 KillMode=process
