@@ -13,7 +13,7 @@ manager:
   keep: []
   enable: []
   services:
-    stunnel: stunnel -c configs/stunnel.conf
+    stunnel: stunnel configs/stunnel.conf
     srapi: ./srapi.py
     telegram_bot: ./bin/telegram_bot
     pystunnel: ./bin/pystunnel
