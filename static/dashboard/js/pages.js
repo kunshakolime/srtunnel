@@ -62,8 +62,6 @@ async function loadServices() {
   startLogStream();
   el.innerHTML = logSel + services.map(s => {
     const logOpen = _expandedLogs.has(s.name);
-    const statusColor = {keep:'var(--green)', enable:'var(--blue)', disable:'var(--text3)'}[s.status] || 'var(--text3)';
-    const statusLabel = {keep:'keep-alive', enable:'run once', disable:'disabled'}[s.status] || s.status;
     const logLines = (s.log || []).join('\n') || '(no output)';
 
     return `
@@ -72,7 +70,6 @@ async function loadServices() {
           <div class="svc-card-left">
             <span class="svc-dot" style="color:${s.running ? 'var(--green)' : 'var(--red)'}">${s.running ? '●' : '○'}</span>
             <span class="svc-name">${s.name}</span>
-            <span class="svc-badge" style="background:${statusColor}1a;color:${statusColor}">${statusLabel}</span>
           </div>
           <div class="svc-card-right">
             ${s.running
@@ -83,7 +80,6 @@ async function loadServices() {
             }
             <select class="btn-sm" style="padding:5px 8px;font-size:11px;font-family:var(--font-mono)"
               onchange="setSvcStatus('${s.name}',this.value)">
-              <option value="keep"    ${s.status==='keep'   ?'selected':''}>keep</option>
               <option value="enable"  ${s.status==='enable' ?'selected':''}>once</option>
               <option value="disable" ${s.status==='disable'?'selected':''}>off</option>
             </select>
