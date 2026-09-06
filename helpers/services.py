@@ -54,31 +54,25 @@ def _save_config(full):
 class Service:
     name:    str
     command: str
-    status:  str          # "enable" | "keep" | "disable"
+    status:  str          # "enable" | "disable"
     running: bool = False
 
 # ── parsing ───────────────────────────────────────────────────────────────────
 
 def _parse_services(block) -> List[Service]:
-    keep_set   = set(block.get("keep",   []) or [])
     enable_set = set(block.get("enable", []) or [])
     services   = block.get("services", {}) or {}
 
     result = []
     for name, command in services.items():
-        if name in keep_set:
-            status = "keep"
-        elif name in enable_set:
-            status = "enable"
-        else:
-            status = "disable"
+        status = "enable" if name in enable_set else "disable"
         result.append(Service(name=name, command=str(command or ""), status=status))
 
     result.sort(key=lambda s: s.name)
     return result
 
 def load_services() -> List[Service]:
-    """Services defined in config.yaml, with current status derived from keep/enable."""
+    """Services defined in config.yaml, with current status derived from enable."""
     return _parse_services(_load_config().get(TMUX_BLOCK, {}))
 
 def find_service(name: str) -> Optional[Service]:
@@ -205,10 +199,10 @@ def list_services(lines: int = 10) -> List[dict]:
     return result
 
 def spawn_enabled() -> dict:
-    """Launch every enable/keep service once. Does not run as a supervisor."""
+    """Launch every enabled service once. Does not run as a supervisor."""
     results = {}
     for s in load_services():
-        if s.status not in ("enable", "keep"):
+        if s.status != "enable":
             continue
         if _is_alive(s.name):
             results[s.name] = "already running"
@@ -246,21 +240,18 @@ def reload_service(name: str):
     return True, "restarted (reload not supported)"
 
 def set_status(name: str, new_status: str):
-    if new_status not in ("enable", "keep", "disable"):
+    if new_status not in ("enable", "disable"):
         return False, "invalid status"
 
     full  = _load_config()
     block = full.setdefault(TMUX_BLOCK, {})
 
-    for key in ("keep", "enable"):
-        lst = block.get(key) or []
-        if name in lst:
-            lst.remove(name)
-        block[key] = lst
+    enable_list = block.get("enable") or []
+    if name in enable_list:
+        enable_list.remove(name)
+    block["enable"] = enable_list
 
-    if new_status == "keep":
-        block.setdefault("keep", []).append(name)
-    elif new_status == "enable":
+    if new_status == "enable":
         block.setdefault("enable", []).append(name)
 
     _save_config(full)

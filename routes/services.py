@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/services")
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class ServiceStatusRequest(BaseModel):
-    status: str  # "enable" | "keep" | "disable"
+    status: str  # "enable" | "disable"
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
