@@ -24,7 +24,7 @@ def list_services(lines: int = 10, user: CurrentUser = None):
 
 @router.post("/spawn")
 def spawn_services(user: CurrentUser = None):
-    """Launch every enable/keep service once."""
+    """Launch every enabled service once."""
     results = svc_helper.spawn_enabled()
     logger.info("Spawn enabled services by %s — %s", user, results)
     return {"results": results}
