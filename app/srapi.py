@@ -31,21 +31,6 @@ logger = logging.getLogger("srapi")
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
-def run_launch_commands():
-    import subprocess
-    path = BASE_DIR / "configs" / "config.yaml"
-    if not path.exists():
-        path = BASE_DIR / "config.yaml"
-    if not path.exists():
-        return
-    block = (yaml.safe_load(path.read_text()) or {}).get("manager", {})
-    for cmd in (block.get("launch_commands") or []):
-        try:
-            subprocess.run(cmd, shell=True, check=True)
-            logger.info("launch_command ok: %s", cmd)
-        except subprocess.CalledProcessError as e:
-            logger.warning("launch_command failed: %s — %s", cmd, e)
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("srapi starting up")
@@ -53,10 +38,8 @@ async def lifespan(app: FastAPI):
         core.init(cfg)
         dns.init(cfg)
         core.init_db()
-        svc_helper.watcher.start()
         svc_helper.start_server_monitor()
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
-        run_launch_commands()
         terminal.start()
     except Exception as e:
         logger.critical("startup failed: %s — %s", type(e).__name__, e)
@@ -64,7 +47,6 @@ async def lifespan(app: FastAPI):
         raise
     yield
     logger.info("srapi shutting down")
-    svc_helper.watcher.stop()
     terminal.stop()
 
 app = FastAPI(lifespan=lifespan)

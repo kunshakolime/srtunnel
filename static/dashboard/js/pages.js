@@ -46,22 +46,6 @@ async function loadServices() {
   if (!res.ok) { el.innerHTML = '<p class="empty-state">Could not load services</p>'; return; }
   const d = await res.json();
 
-  const badge = document.getElementById('watcher-badge');
-  const toggleBtn = document.getElementById('watcher-toggle-btn');
-  if (d.watcher) {
-    badge.textContent = '● Watcher ON';
-    badge.style.background = 'rgba(52,199,106,.15)';
-    badge.style.color = 'var(--green)';
-    toggleBtn.textContent = 'Stop Watcher';
-    toggleBtn.className = 'btn-sm btn-danger';
-  } else {
-    badge.textContent = '○ Watcher OFF';
-    badge.style.background = 'rgba(240,64,96,.12)';
-    badge.style.color = 'var(--red)';
-    toggleBtn.textContent = 'Start Watcher';
-    toggleBtn.className = 'btn-sm btn-green';
-  }
-
   const services = d.services || [];
   _svcData = services;
   if (!services.length) { el.innerHTML = '<p class="empty-state">No services configured</p>'; return; }
@@ -140,15 +124,12 @@ function filterServices() {
 function switchSvcMode(mode) {
   _svcMode = mode;
   document.querySelectorAll('.svc-mode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-  const watcherBadge = document.getElementById('watcher-badge');
-  const watcherBtn   = document.getElementById('watcher-toggle-btn');
+  const spawnBtn = document.getElementById('spawn-all-btn');
   if (mode === 'systemd') {
-    watcherBadge.style.display = 'none';
-    watcherBtn.style.display   = 'none';
+    spawnBtn.style.display = 'none';
     loadSystemdUnits();
   } else {
-    watcherBadge.style.display = '';
-    watcherBtn.style.display   = '';
+    spawnBtn.style.display = '';
     loadServices();
   }
 }
@@ -223,12 +204,17 @@ async function setSvcStatus(name, status) {
   else { const d = await res.json(); toast(d.detail || 'Failed', 'err'); loadServices(); }
 }
 
-async function toggleWatcher() {
-  const badge = document.getElementById('watcher-badge');
-  const isOn  = badge.textContent.includes('ON');
-  const res   = await apiFetch(`/api/services/watcher/${isOn ? 'stop' : 'start'}`, { method: 'POST' });
-  if (res.ok) loadServices();
-  else toast('Failed', 'err');
+async function spawnServices() {
+  const res = await apiFetch('/api/services/spawn', { method: 'POST' });
+  if (res.ok) {
+    const d = await res.json();
+    const names = Object.keys(d.results || {});
+    toast(names.length ? `Spawned: ${names.join(', ')}` : 'Nothing to spawn');
+    loadServices();
+  } else {
+    const d = await res.json();
+    toast(d.detail || 'Failed', 'err');
+  }
 }
 
 // ── Speed Test ────────────────────────────────────────────────────────────────
