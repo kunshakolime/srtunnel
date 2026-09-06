@@ -105,6 +105,25 @@ def _is_alive(name: str) -> bool:
 
 LOG_DIR = Path("/tmp/srapi-services")
 
+# Stop auto-restarting a `keep` service after this many consecutive
+# startup failures. Prevents an infinite 2s crash-loop (and its memory /
+# journal flood) when a service can't start (e.g. port already bound
+# elsewhere). The reason is written to the service's own log file.
+FAILURE_LIMIT = 3
+
+def _note_give_up(name: str, count: int):
+    log_file = LOG_DIR / f"{name}.log"
+    try:
+        with open(log_file, "a") as f:
+            f.write(f"\n[watcher] Service '{name}' stopped because it died too many times "
+                    f"({count} consecutive failures).\n")
+            f.write("[watcher] Auto-restarts are suspended. Fix the issue, then "
+                    "start it manually (or reload the service).\n")
+    except Exception:
+        pass
+    logger.error("Service %s gave up after %d consecutive failures — see %s",
+                 name, count, log_file)
+
 def _start_session(s: Service):
     _tmux("kill-session", "-t", s.name)
     LOG_DIR.mkdir(exist_ok=True)
@@ -120,12 +139,14 @@ def _start_session(s: Service):
     )
     if r.returncode != 0:
         logger.error("tmux new-session failed for %s: %s", s.name, r.stderr.strip())
-        return
+        return False
     time.sleep(1)
     if log_file.exists() and log_file.read_text().strip():
         logger.info("Service %s output:\n%s", s.name, log_file.read_text().strip())
     if not _is_alive(s.name):
         logger.error("Service %s died — see %s", s.name, log_file)
+        return False
+    return True
 
 def _stop_session(name: str):
     _tmux("kill-session", "-t", name)
@@ -170,6 +191,8 @@ class _Watcher:
         self._services: List[Service] = []
         self._running  = False
         self._thread: Optional[threading.Thread] = None
+        self._failures: dict = {}
+        self._gave_up: set = set()
         self._reload()
 
     def _reload(self):
@@ -183,13 +206,26 @@ class _Watcher:
             for s in self._services:
                 s.running = _is_alive(s.name)
 
+    def _record_start(self, name: str, ok: bool):
+        with self._lock:
+            if ok:
+                self._failures.pop(name, None)
+                self._gave_up.discard(name)
+            else:
+                self._failures[name] = self._failures.get(name, 0) + 1
+                if self._failures[name] >= FAILURE_LIMIT:
+                    self._gave_up.add(name)
+                    self._failures.pop(name, None)
+                    _note_give_up(name, FAILURE_LIMIT)
+
     def _loop(self):
         # on start: launch enabled services that aren't running yet
         self._sync_running()
         with self._lock:
             to_start = [s for s in self._services if s.status in ("enable", "keep") and not s.running]
         for s in to_start:
-            _start_session(s)
+            ok = _start_session(s)
+            self._record_start(s.name, ok)
             time.sleep(0.3)
 
         while self._running:
@@ -203,9 +239,12 @@ class _Watcher:
 
             self._sync_running()
             with self._lock:
-                to_restart = [s for s in self._services if s.status == "keep" and not s.running]
+                to_restart = [s for s in self._services
+                              if s.status == "keep" and not s.running
+                              and s.name not in self._gave_up]
             for s in to_restart:
-                _start_session(s)
+                ok = _start_session(s)
+                self._record_start(s.name, ok)
             time.sleep(KEEPALIVE_INTERVAL)
 
     # ── public interface ──────────────────────────────────────────────────────
@@ -248,7 +287,11 @@ class _Watcher:
             s = next((x for x in self._services if x.name == name), None)
         if not s:
             return False, "service not found"
-        _start_session(s)
+        with self._lock:
+            self._failures.pop(name, None)
+            self._gave_up.discard(name)
+        ok = _start_session(s)
+        self._record_start(name, ok)
         return True, "started"
 
     def stop_service(self, name: str):
