@@ -5,6 +5,8 @@ Loads services from config.yaml (manager block), watches tmux sessions,
 and restarts keep-alive services when they die.
 """
 
+import glob
+import os
 import subprocess
 import threading
 import time
@@ -79,29 +81,49 @@ def _tmux(*args) -> bool:
     r = subprocess.run(["tmux", *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return r.returncode == 0
 
+def _tmux_sockets() -> set:
+    """All tmux server sockets for this user (default server + any -L/-S ones)."""
+    base = os.environ.get("TMUX_TMPDIR") or os.environ.get("TMPDIR") or "/tmp"
+    return set(glob.glob(os.path.join(base, f"tmux-{os.getuid()}", "*")))
+
 def _active_sessions():
-    p = subprocess.run(
-        ["tmux", "list-sessions", "-F", "#{session_name}"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-    )
-    return set(p.stdout.splitlines()) if p.returncode == 0 else set()
+    sessions = set()
+    for sock in _tmux_sockets():
+        p = subprocess.run(
+            ["tmux", "-S", sock, "list-sessions", "-F", "#{session_name}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        if p.returncode == 0:
+            sessions.update(p.stdout.splitlines())
+    return sessions
+
+def _tmux_kill_session(name: str):
+    """Kill session `name` in every tmux server, not just the default one."""
+    for sock in _tmux_sockets():
+        subprocess.run(["tmux", "-S", sock, "kill-session", "-t", name],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def _is_alive(name: str) -> bool:
-    """Check if a tmux session has a live pane (not just an exited shell)."""
-    p = subprocess.run(
-        ["tmux", "list-panes", "-t", name, "-F", "#{pane_pid}"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
-    )
-    if p.returncode != 0 or not p.stdout.strip():
-        return False
-    pid = p.stdout.strip().splitlines()[0]
-    # check if the pane's child process is still running
-    try:
-        import os, signal
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, ValueError):
-        return False
+    """Check if a tmux session with a live pane exists in ANY tmux server.
+
+    Scans every server socket so a session running in another tmux server is
+    still recognised as alive — otherwise the watcher would spawn a duplicate.
+    """
+    for sock in _tmux_sockets():
+        p = subprocess.run(
+            ["tmux", "-S", sock, "list-panes", "-t", name, "-F", "#{pane_pid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
+        if p.returncode != 0 or not p.stdout.strip():
+            continue
+        pid = p.stdout.strip().splitlines()[0]
+        # check if the pane's child process is still running
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except (OSError, ValueError):
+            continue
+    return False
 
 LOG_DIR = Path("/tmp/srapi-services")
 
@@ -125,7 +147,7 @@ def _note_give_up(name: str, count: int):
                  name, count, log_file)
 
 def _start_session(s: Service):
-    _tmux("kill-session", "-t", s.name)
+    _tmux_kill_session(s.name)
     LOG_DIR.mkdir(exist_ok=True)
     log_file = LOG_DIR / f"{s.name}.log"
     log_file.write_text("")  # clear old log
@@ -149,7 +171,7 @@ def _start_session(s: Service):
     return True
 
 def _stop_session(name: str):
-    _tmux("kill-session", "-t", name)
+    _tmux_kill_session(name)
 
 def _reload_session(name: str):
     """Send SIGHUP to the process in the tmux session to reload it."""
