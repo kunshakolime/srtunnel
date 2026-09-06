@@ -10,8 +10,9 @@ manager:
   # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053
   - echo "starting..."
   - sleep 3
-  keep: []
-  enable: []
+  enable:
+  - websocket
+  - badvpn
   services:
     stunnel: stunnel configs/stunnel.conf
     srapi: ./srapi.py
