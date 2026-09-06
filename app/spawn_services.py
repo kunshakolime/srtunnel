@@ -3,12 +3,12 @@
 One-shot service spawner.
 
 Parses config.yaml, runs the manager launch_commands, and launches each
-enable/keep service into its own tmux session — then exits. It never stays
+enabled service into its own tmux session — then exits. It never stays
 running and never brings a stopped service back up on its own; that is
 deliberate: restarting is done on demand (manual, cron, or systemd).
 
 Usage:
-    python3 app/spawn_services.py            # spawn all enable + keep services
+    python3 app/spawn_services.py            # spawn all enabled services
     python3 app/spawn_services.py <name>     # spawn just that one service
 """
 
