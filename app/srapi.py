@@ -46,36 +46,6 @@ def run_launch_commands():
         except subprocess.CalledProcessError as e:
             logger.warning("launch_command failed: %s — %s", cmd, e)
 
-# ── Heap trimming ──────────────────────────────────────────────────────────────
-
-import ctypes, threading as _threading
-
-_malloc_trim_evt = _threading.Event()
-
-def _malloc_trim_loop(interval: float = 60.0):
-    """Periodically ask glibc to return freed heap pages to the OS.
-    Prevents RSS from creeping up over days due to allocator fragmentation."""
-    try:
-        libc = ctypes.CDLL("libc.so.6")
-        malloc_trim = libc.malloc_trim
-        malloc_trim.argtypes = [ctypes.c_size_t]
-        malloc_trim.restype = ctypes.c_int
-    except Exception as e:
-        logger.warning("malloc_trim unavailable: %s", e)
-        return
-    while not _malloc_trim_evt.wait(interval):
-        try:
-            malloc_trim(0)
-        except Exception:
-            pass
-
-def _start_heap_trim():
-    t = _threading.Thread(target=_malloc_trim_loop, daemon=True, name="heap-trim")
-    t.start()
-
-def _stop_heap_trim():
-    _malloc_trim_evt.set()
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("srapi starting up")
@@ -88,7 +58,6 @@ async def lifespan(app: FastAPI):
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
         run_launch_commands()
         terminal.start()
-        _start_heap_trim()
     except Exception as e:
         logger.critical("startup failed: %s — %s", type(e).__name__, e)
         logger.critical(traceback.format_exc())
@@ -97,7 +66,6 @@ async def lifespan(app: FastAPI):
     logger.info("srapi shutting down")
     svc_helper.watcher.stop()
     terminal.stop()
-    _stop_heap_trim()
 
 app = FastAPI(lifespan=lifespan)
 
