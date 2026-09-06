@@ -1,8 +1,11 @@
 """
 helpers/services.py
 
-Loads services from config.yaml (manager block), watches tmux sessions,
-and restarts keep-alive services when they die.
+Parses the services defined in config.yaml (manager block) and exposes
+one-shot tmux spawn/stop/reload operations. It does NOT supervise
+services: launching is an explicit, stateless command — the web UI button
+or `app/spawn_services.py`. Nothing here stays running or revives a dead
+service.
 """
 
 import glob
@@ -13,20 +16,19 @@ import time
 import logging
 import shlex
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 from ruamel.yaml import YAML
 
 # ── constants ────────────────────────────────────────────────────────────────
 
-CONFIG_FILE        = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
 # fallback for old installs where config.yaml is still at root
 if not CONFIG_FILE.exists():
     _fallback = Path(__file__).resolve().parent.parent / "config.yaml"
     if _fallback.exists():
         CONFIG_FILE = _fallback
-TMUX_BLOCK         = "manager"
-KEEPALIVE_INTERVAL = 2   # seconds between keep-alive checks
+TMUX_BLOCK = "manager"
 
 logger = logging.getLogger("srapi.services")
 
@@ -75,11 +77,14 @@ def _parse_services(block) -> List[Service]:
     result.sort(key=lambda s: s.name)
     return result
 
-# ── tmux helpers ──────────────────────────────────────────────────────────────
+def load_services() -> List[Service]:
+    """Services defined in config.yaml, with current status derived from keep/enable."""
+    return _parse_services(_load_config().get(TMUX_BLOCK, {}))
 
-def _tmux(*args) -> bool:
-    r = subprocess.run(["tmux", *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return r.returncode == 0
+def find_service(name: str) -> Optional[Service]:
+    return next((s for s in load_services() if s.name == name), None)
+
+# ── tmux helpers ──────────────────────────────────────────────────────────────
 
 def _tmux_sockets() -> set:
     """All tmux server sockets for this user (default server + any -L/-S ones)."""
@@ -107,7 +112,7 @@ def _is_alive(name: str) -> bool:
     """Check if a tmux session with a live pane exists in ANY tmux server.
 
     Scans every server socket so a session running in another tmux server is
-    still recognised as alive — otherwise the watcher would spawn a duplicate.
+    still recognised as alive — otherwise a new spawn would duplicate it.
     """
     for sock in _tmux_sockets():
         p = subprocess.run(
@@ -126,25 +131,6 @@ def _is_alive(name: str) -> bool:
     return False
 
 LOG_DIR = Path("/tmp/srapi-services")
-
-# Stop auto-restarting a `keep` service after this many consecutive
-# startup failures. Prevents an infinite 2s crash-loop (and its memory /
-# journal flood) when a service can't start (e.g. port already bound
-# elsewhere). The reason is written to the service's own log file.
-FAILURE_LIMIT = 3
-
-def _note_give_up(name: str, count: int):
-    log_file = LOG_DIR / f"{name}.log"
-    try:
-        with open(log_file, "a") as f:
-            f.write(f"\n[watcher] Service '{name}' stopped because it died too many times "
-                    f"({count} consecutive failures).\n")
-            f.write("[watcher] Auto-restarts are suspended. Fix the issue, then "
-                    "start it manually (or reload the service).\n")
-    except Exception:
-        pass
-    logger.error("Service %s gave up after %d consecutive failures — see %s",
-                 name, count, log_file)
 
 def _start_session(s: Service):
     _tmux_kill_session(s.name)
@@ -183,13 +169,13 @@ def _reload_session(name: str):
         )
         if p.returncode != 0:
             return False, "could not get pane PID"
-        
+
         pane_pid = p.stdout.strip()
         if not pane_pid:
             return False, "no pane PID found"
-        
+
         # Send SIGHUP to reload the process
-        p = subprocess.run(["kill", "-HUP", pane_pid], 
+        p = subprocess.run(["kill", "-HUP", pane_pid],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if p.returncode == 0:
             return True, f"reload signal sent to PID {pane_pid}"
@@ -205,170 +191,80 @@ def _capture_log(name: str, lines: int) -> List[str]:
         return [l for l in text.splitlines() if l.strip()][-lines:]
     return []
 
-# ── watcher ───────────────────────────────────────────────────────────────────
+# ── one-shot public API ───────────────────────────────────────────────────────
 
-class _Watcher:
-    def __init__(self):
-        self._lock     = threading.Lock()
-        self._services: List[Service] = []
-        self._running  = False
-        self._thread: Optional[threading.Thread] = None
-        self._failures: dict = {}
-        self._gave_up: set = set()
-        self._reload()
+def list_services(lines: int = 10) -> List[dict]:
+    result = []
+    for s in load_services():
+        result.append({
+            "name":    s.name,
+            "status":  s.status,
+            "running": _is_alive(s.name),
+            "log":     _capture_log(s.name, lines),
+        })
+    return result
 
-    def _reload(self):
-        block = _load_config().get(TMUX_BLOCK, {})
-        with self._lock:
-            self._services = _parse_services(block)
-            self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0
+def spawn_enabled() -> dict:
+    """Launch every enable/keep service once. Does not run as a supervisor."""
+    results = {}
+    for s in load_services():
+        if s.status not in ("enable", "keep"):
+            continue
+        if _is_alive(s.name):
+            results[s.name] = "already running"
+            continue
+        results[s.name] = "started" if _start_session(s) else "failed"
+        time.sleep(0.3)
+    return results
 
-    def _sync_running(self):
-        with self._lock:
-            for s in self._services:
-                s.running = _is_alive(s.name)
+def start_service(name: str):
+    s = find_service(name)
+    if not s:
+        return False, "service not found"
+    ok = _start_session(s)
+    return True, "started" if ok else f"start failed — see {LOG_DIR / (name + '.log')}"
 
-    def _record_start(self, name: str, ok: bool):
-        with self._lock:
-            if ok:
-                self._failures.pop(name, None)
-                self._gave_up.discard(name)
-            else:
-                self._failures[name] = self._failures.get(name, 0) + 1
-                if self._failures[name] >= FAILURE_LIMIT:
-                    self._gave_up.add(name)
-                    self._failures.pop(name, None)
-                    _note_give_up(name, FAILURE_LIMIT)
+def stop_service(name: str):
+    if not find_service(name):
+        return False, "service not found"
+    _stop_session(name)
+    return True, "stopped"
 
-    def _loop(self):
-        # on start: launch enabled services that aren't running yet
-        self._sync_running()
-        with self._lock:
-            to_start = [s for s in self._services if s.status in ("enable", "keep") and not s.running]
-        for s in to_start:
-            ok = _start_session(s)
-            self._record_start(s.name, ok)
-            time.sleep(0.3)
+def reload_service(name: str):
+    """Reload a service by sending SIGHUP, or restart if reload fails."""
+    s = find_service(name)
+    if not s:
+        return False, "service not found"
 
-        while self._running:
-            # reload config if it changed on disk
-            try:
-                mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0
-                if mtime != self._config_mtime:
-                    self._reload()
-            except OSError:
-                pass
+    success, msg = _reload_session(name)
+    if success:
+        return True, f"reloaded ({msg})"
 
-            self._sync_running()
-            with self._lock:
-                to_restart = [s for s in self._services
-                              if s.status == "keep" and not s.running
-                              and s.name not in self._gave_up]
-            for s in to_restart:
-                ok = _start_session(s)
-                self._record_start(s.name, ok)
-            time.sleep(KEEPALIVE_INTERVAL)
+    _stop_session(name)
+    time.sleep(0.5)
+    _start_session(s)
+    return True, "restarted (reload not supported)"
 
-    # ── public interface ──────────────────────────────────────────────────────
+def set_status(name: str, new_status: str):
+    if new_status not in ("enable", "keep", "disable"):
+        return False, "invalid status"
 
-    def start(self):
-        if self._running:
-            return False
-        self._reload()
-        self._running = True
-        self._thread  = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-        return True
+    full  = _load_config()
+    block = full.setdefault(TMUX_BLOCK, {})
 
-    def stop(self):
-        if not self._running:
-            return False
-        self._running = False
-        return True
+    for key in ("keep", "enable"):
+        lst = block.get(key) or []
+        if name in lst:
+            lst.remove(name)
+        block[key] = lst
 
-    @property
-    def active(self):
-        return self._running
+    if new_status == "keep":
+        block.setdefault("keep", []).append(name)
+    elif new_status == "enable":
+        block.setdefault("enable", []).append(name)
 
-    def list_services(self, lines: int = 10):
-        self._sync_running()
-        with self._lock:
-            services = list(self._services)
-        result = []
-        for s in services:
-            result.append({
-                "name":    s.name,
-                "status":  s.status,
-                "running": s.running,
-                "log":     _capture_log(s.name, lines),
-            })
-        return result
-
-    def start_service(self, name: str):
-        with self._lock:
-            s = next((x for x in self._services if x.name == name), None)
-        if not s:
-            return False, "service not found"
-        with self._lock:
-            self._failures.pop(name, None)
-            self._gave_up.discard(name)
-        ok = _start_session(s)
-        self._record_start(name, ok)
-        return True, "started"
-
-    def stop_service(self, name: str):
-        with self._lock:
-            s = next((x for x in self._services if x.name == name), None)
-        if not s:
-            return False, "service not found"
-        _stop_session(name)
-        return True, "stopped"
-
-    def reload_service(self, name: str):
-        """Reload a service by sending SIGHUP, or restart if reload fails."""
-        with self._lock:
-            s = next((x for x in self._services if x.name == name), None)
-        if not s:
-            return False, "service not found"
-        
-        # First try to reload by sending SIGHUP
-        success, msg = _reload_session(name)
-        if success:
-            return True, f"reloaded ({msg})"
-        
-        # If reload fails, fall back to restart
-        _stop_session(name)
-        time.sleep(0.5)  # Brief pause
-        _start_session(s)
-        return True, "restarted (reload not supported)"
-
-    def set_status(self, name: str, new_status: str):
-        if new_status not in ("enable", "keep", "disable"):
-            return False, "invalid status"
-
-        full  = _load_config()
-        block = full.setdefault(TMUX_BLOCK, {})
-
-        for key in ("keep", "enable"):
-            lst = block.get(key) or []
-            if name in lst:
-                lst.remove(name)
-            block[key] = lst
-
-        if new_status == "keep":
-            block.setdefault("keep", []).append(name)
-        elif new_status == "enable":
-            block.setdefault("enable", []).append(name)
-
-        _save_config(full)
-        self._reload()
-        return True, new_status
-
-
-# ── singleton ─────────────────────────────────────────────────────────────────
-
-watcher = _Watcher()
-
+    _save_config(full)
+    return True, new_status
 
 # ── Server monitor ─────────────────────────────────────────────────────────────
 

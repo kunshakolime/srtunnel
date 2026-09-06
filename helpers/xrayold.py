@@ -63,7 +63,7 @@ def _trigger_reload():
     """Trigger Xray service reload after config changes."""
     try:
         from helpers import services
-        ok, detail = services.watcher.reload_service("xray")
+        ok, detail = services.reload_service("xray")
         if ok:
             logger.info("xray config changed, service reloaded: %s", detail)
         else:

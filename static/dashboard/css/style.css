@@ -332,9 +332,6 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 .svc-mode.active{background:var(--accent);color:#fff}
 .svc-mode:not(.active):hover{background:var(--bg4);color:var(--text2)}
 
-/* ── WATCHER BADGE ── */
-.watcher-badge{font-size:11px;font-family:var(--font-mono);padding:5px 10px;border-radius:6px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
-
 /* ── SERVICE TOOLBAR ── */
 .svc-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 
@@ -425,6 +422,4 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 
   .section-header h3 { font-size: 14px; }
   .section-header { flex-wrap: wrap; gap: 8px; }
-  #watcher-badge { font-size: 10px !important; padding: 3px 8px !important; }
-  #watcher-toggle-btn { font-size: 10px; padding: 4px 10px; }
 }
