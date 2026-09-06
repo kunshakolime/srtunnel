@@ -73,7 +73,6 @@ const _loaders = {
   users:   () => loadUsers(),
   xray:    () => loadXray(),
   dns:     () => loadDns(),
-  terminal: (force) => loadTerminal(force),
   scope:   () => loadScope(),
   servers: () => { loadServersPage(); loadTokens(); },
   tokens:  () => {},

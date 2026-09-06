@@ -40,14 +40,12 @@ async def lifespan(app: FastAPI):
         core.init_db()
         svc_helper.start_server_monitor()
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
-        terminal.start()
     except Exception as e:
         logger.critical("startup failed: %s — %s", type(e).__name__, e)
         logger.critical(traceback.format_exc())
         raise
     yield
     logger.info("srapi shutting down")
-    terminal.stop()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -103,7 +101,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
-from routes import auth, users, xray, files, services, system, systemd, terminal
+from routes import auth, users, xray, files, services, system, systemd
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -112,7 +110,6 @@ app.include_router(files.router)
 app.include_router(services.router)
 app.include_router(system.router)
 app.include_router(systemd.router)
-app.include_router(terminal.router)
 
 
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────
