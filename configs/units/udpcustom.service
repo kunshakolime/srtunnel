@@ -1,5 +1,5 @@
 [Unit]
-Description=srtunnel udp-custom
+Description=udpcustom
 After=network.target
 
 [Service]

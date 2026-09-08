@@ -1,11 +1,11 @@
 [Unit]
-Description=srtunnel zivpn
+Description=websocket
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/udp-zivpn server -c configs/zivpn.json
+ExecStart=/opt/srtunnel/bin/websocket -c configs/config.yaml
 Restart=always
 RestartSec=2
 

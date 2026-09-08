@@ -1,11 +1,11 @@
 [Unit]
-Description=srtunnel telegram_bot
+Description=stunnel
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/telegram_bot
+ExecStart=stunnel configs/stunnel.conf
 Restart=always
 RestartSec=2
 

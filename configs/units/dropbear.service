@@ -1,11 +1,11 @@
 [Unit]
-Description=srtunnel slowdns
+Description=dropbear
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/dnstt-server -udp :8053 -privkey-file slowdns.key sd.example.com 127.0.0.1:22
+ExecStart=/opt/srtunnel/bin/dropbear -EFR -p 127.0.0.1:23 -W 65536 -b /opt/srtunnel/configs/bannerssh
 Restart=always
 RestartSec=2
 

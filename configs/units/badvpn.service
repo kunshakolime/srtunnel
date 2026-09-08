@@ -1,5 +1,5 @@
 [Unit]
-Description=srtunnel badvpn
+Description=badvpn
 After=network.target
 
 [Service]
