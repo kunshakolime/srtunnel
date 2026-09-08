@@ -1,5 +1,5 @@
 [Unit]
-Description=srtunnel tracker
+Description=trafficmeter
 After=network.target
 
 [Service]

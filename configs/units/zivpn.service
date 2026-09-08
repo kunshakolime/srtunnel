@@ -1,11 +1,11 @@
 [Unit]
-Description=srtunnel hysteria2
+Description=zivpn
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/hysteria2 server --config configs/hysteria2.yaml
+ExecStart=/opt/srtunnel/bin/udp-zivpn server -c configs/zivpn.json
 Restart=always
 RestartSec=2
 

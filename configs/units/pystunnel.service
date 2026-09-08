@@ -1,5 +1,5 @@
 [Unit]
-Description=srtunnel pystunnel
+Description=pystunnel
 After=network.target
 
 [Service]

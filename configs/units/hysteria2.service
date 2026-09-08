@@ -1,11 +1,11 @@
 [Unit]
-Description=srtunnel stunnel
+Description=hysteria2
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=stunnel configs/stunnel.conf
+ExecStart=/opt/srtunnel/bin/hysteria2 server --config configs/hysteria2.yaml
 Restart=always
 RestartSec=2
 
