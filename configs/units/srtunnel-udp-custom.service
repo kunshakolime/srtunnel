@@ -1,0 +1,13 @@
+[Unit]
+Description=srtunnel udp-custom
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/srtunnel
+ExecStart=/opt/srtunnel/bin/udp-custom -c configs/udp-custom.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

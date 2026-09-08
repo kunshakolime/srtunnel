@@ -1,0 +1,13 @@
+[Unit]
+Description=srtunnel dropbear
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/srtunnel
+ExecStart=/opt/srtunnel/bin/dropbear -EFR -p 127.0.0.1:23 -W 65536 -b /opt/srtunnel/configs/bannerssh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
