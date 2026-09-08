@@ -1,0 +1,13 @@
+[Unit]
+Description=srtunnel stunnel
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/srtunnel
+ExecStart=stunnel configs/stunnel.conf
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

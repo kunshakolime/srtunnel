@@ -1,0 +1,13 @@
+[Unit]
+Description=srtunnel zivpn
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/srtunnel
+ExecStart=/opt/srtunnel/bin/udp-zivpn server -c configs/zivpn.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
