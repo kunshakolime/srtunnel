@@ -70,6 +70,7 @@ async function loadDashboard() {
     document.getElementById('bwDown').textContent = d.bandwidth?.rx || '—';
     document.getElementById('bwUp').textContent = d.bandwidth?.tx || '—';
     markRefresh();
+    loadPorts();
   } catch (e) {
     console.error('Dashboard error', e);
     if (!metricsEl.dataset.built) {
@@ -79,9 +80,29 @@ async function loadDashboard() {
   if (spinEl) spinEl.classList.remove('spinning');
 }
 
-// ── Users ─────────────────────────────────────────────────────────────────────
+// ── Ports in use ─────────────────────────────────────────────────────────────
 
-// Override loading for users table (needs special formatting)
+async function loadPorts() {
+  const el = document.getElementById('portsBody');
+  if (!el) return;
+  try {
+    const res = await apiFetch('/api/ports');
+    if (!res.ok) { el.innerHTML = ''; return; }
+    const rows = await res.json();
+    const protoColor = p => p === 'udp' ? 'var(--accent)' : 'var(--green)';
+    el.innerHTML = rows.map(r => `
+      <tr>
+        <td style="font-family:var(--font-mono)"><strong>${r.port}</strong></td>
+        <td><span class="badge" style="background:${protoColor(r.proto)}1a;color:${protoColor(r.proto)}">${r.proto}</span></td>
+        <td style="font-family:var(--font-mono);font-size:12px">${r.address}</td>
+        <td style="font-family:var(--font-mono);font-size:12px;color:var(--text3)">${r.pid || '—'}</td>
+        <td>${r.process || 'kernel'}</td>
+      </tr>`).join('') ||
+      '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:16px">No listeners</td></tr>';
+  } catch (e) { el.innerHTML = ''; }
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
 function showUsersLoading() {
   document.getElementById('usersBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px"><span class="spinner"></span><div style="margin-top:10px;color:var(--text3)">Loading...</div></td></tr>';
 }

@@ -70,6 +70,10 @@ def system_info(user: CurrentUser):
         }
     return cache
 
+@router.get("/ports")
+def listening_ports(user: CurrentUser):
+    return monitor.listening_ports()
+
 @router.get("/ssh-users")
 def get_ssh_users(user: CurrentUser):
     logged_in = monitor.logged_in_users()
