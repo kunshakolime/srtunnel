@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 import psutil
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,59 @@ def user_connections(username):
 
 def total_connections():
     return sum(c for u, c in logged_in_users().items() if u != "root")
+
+
+# ── Listening sockets (port map) ───────────────────────────────────────────────
+
+def listening_ports():
+    """Every process listening on a port — what port and who owns it."""
+    out = []
+    try:
+        for conn in psutil.net_connections(kind="inet"):
+            if not conn.laddr or not conn.laddr.port:
+                continue
+            kind = {socket.SOCK_STREAM: "tcp", socket.SOCK_DGRAM: "udp"}.get(conn.type)
+            if not kind:
+                continue
+            if kind == "tcp" and conn.status != psutil.CONN_LISTEN:
+                continue
+            if kind == "udp" and conn.raddr:
+                continue
+            if kind == "udp" and conn.laddr.port >= 49152:
+                continue  # skip ephemeral per-flow UDP sockets, only show real listeners
+            name = ""
+            pid  = conn.pid
+            if pid is not None:
+                try:
+                    name = psutil.Process(pid).name()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    name = ""
+            out.append({
+                "proto":   kind,
+                "address": conn.laddr.ip,
+                "port":    conn.laddr.port,
+                "pid":     pid,
+                "process": name,
+            })
+    except (psutil.Error, OSError):
+        pass
+    # dedupe (udp can report the same socket twice)
+    seen, uniq = set(), []
+    for e in out:
+        key = (e["proto"], e["pid"], e["address"], e["port"])
+        if key not in seen:
+            seen.add(key)
+            uniq.append(e)
+    # a process with many distinct UDP ports is a proxy/forwarder (e.g. xray),
+    # not a listener — drop its UDP rows so the map stays glanceable
+    udp_ports: dict = {}
+    for e in uniq:
+        if e["proto"] == "udp" and e["pid"]:
+            udp_ports.setdefault(e["pid"], set()).add(e["port"])
+    noisy = {pid for pid, ports in udp_ports.items() if len(ports) > 5}
+    uniq  = [e for e in uniq if not (e["proto"] == "udp" and e["pid"] in noisy)]
+    uniq.sort(key=lambda e: (e["port"], e["proto"], e["process"]))
+    return uniq
 
 
 # ── System stats ──────────────────────────────────────────────────────────────
