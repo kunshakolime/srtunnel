@@ -103,6 +103,13 @@ EOF
 
 ln -sf /opt/srtunnel/configs/stunnel.conf /etc/stunnel/stunnel.conf 2>/dev/null || true
 
+# ── Install tunnel unit files ──────────────────────────────────────────────
+echo "Installing tunnel systemd units..."
+for unit in configs/units/*.service; do
+    [ -e "$unit" ] || continue
+    sed "s|/opt/srtunnel|$BOT_DIR|g" "$unit" > "/etc/systemd/system/$(basename "$unit")"
+done
+
 # ── Dashboard admin group ─────────────────────────────────────────────────────
 groupadd -f srtadmin 2>/dev/null || true
 usermod -aG srtadmin root 2>/dev/null || true
@@ -110,5 +117,8 @@ usermod -aG srtadmin root 2>/dev/null || true
 # ── Done ──────────────────────────────────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now srapi 2>/dev/null || true
+for svc in ${SRTUNNEL_ENABLE:-badvpn ws-sr}; do
+    systemctl enable --now "$svc" 2>/dev/null || true
+done
 
 echo "tunnel up and running (nginx not configured — run ./scripts/setup-nginx.sh if needed)"
