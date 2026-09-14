@@ -133,7 +133,7 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 .hdr-actions{display:flex;gap:8px}
 
 /* ── METRICS ── */
-.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px}
 .metric{
   background:var(--bg3);border-radius:14px;padding:18px;border:1px solid var(--border);
   transition:.2s;position:relative;overflow:hidden
@@ -147,6 +147,13 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 
 .card{background:var(--bg3);border-radius:14px;border:1px solid var(--border);padding:18px;margin-bottom:14px}
 .card h4{font-size:14px;font-weight:600;margin-bottom:14px;color:var(--text2)}
+
+/* ── DASHBOARD LAYOUT ── */
+.dash-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,340px);gap:14px;align-items:start}
+.dash-grid > .card{margin-bottom:0}
+.dash-side{display:grid;gap:14px}
+.port-hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+.port-hdr h4{margin-bottom:0}
 
 /* ── TABLES ── */
 .table-wrap{overflow-x:auto}
@@ -383,6 +390,10 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
   /* metrics: 2-col grid on phone is fine, drop min-width */
   .metric-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .metric { padding: 13px 12px; }
+
+  /* dashboard: stack the side column under the port map */
+  .dash-grid { grid-template-columns: 1fr; }
+  .port-hdr h4 { font-size: 13px; }
   .metric-value { font-size: 19px; }
 
   /* tables: tighten cell padding so more fits */

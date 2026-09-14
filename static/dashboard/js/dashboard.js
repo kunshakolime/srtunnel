@@ -99,7 +99,17 @@ async function loadPorts() {
         <td>${r.process || 'kernel'}</td>
       </tr>`).join('') ||
       '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:16px">No listeners</td></tr>';
+    filterPorts();
   } catch (e) { el.innerHTML = ''; }
+}
+
+function filterPorts() {
+  const q = document.getElementById('portSearch').value.toLowerCase();
+  const x = document.querySelector('.port-search-x');
+  if (x) x.classList.toggle('visible', q.length > 0);
+  document.querySelectorAll('#portsBody tr').forEach(tr => {
+    tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────

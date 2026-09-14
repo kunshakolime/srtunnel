@@ -7,6 +7,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 from contextlib import asynccontextmanager
 
+# show this process as "srapi", not "python3" (PR_SET_NAME)
+import ctypes
+try:
+    ctypes.CDLL(None).prctl(15, b"srapi", 0, 0, 0)
+except Exception:
+    pass
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
