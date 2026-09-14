@@ -20,7 +20,7 @@ function showPage(name, btn) {
     loadDashboard();
     _startDashboardTimer();
   } else if (name === 'services') {
-    loadServices();
+    switchSvcMode(_svcMode);
   } else {
     const loader = _loaders[name];
     if (loader) loader();
@@ -81,7 +81,7 @@ const _loaders = {
 
 function manualRefresh() {
   if (_currentPage === 'dashboard') { loadDashboard(); return; }
-  if (_currentPage === 'services')  { loadServices();  return; }
+  if (_currentPage === 'services')  { switchSvcMode(_svcMode); return; }
   const loader = _loaders[_currentPage];
   if (loader) loader(true);
 }

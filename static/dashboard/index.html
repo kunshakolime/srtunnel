@@ -157,13 +157,13 @@
       <div class="section-header">
         <div class="hdr-actions">
           <button id="spawn-all-btn" class="btn-green btn-sm" onclick="spawnServices()">▶ Spawn services</button>
-          <button class="btn-sm" onclick="loadServices()">↺ Refresh</button>
+          <button class="btn-sm" onclick="switchSvcMode(_svcMode)">↺ Refresh</button>
         </div>
       </div>
       <div class="svc-toolbar">
         <div class="svc-mode-toggle" id="svcModeToggle">
-          <button class="svc-mode active" data-mode="tmux" onclick="switchSvcMode('tmux')">tmux</button>
-          <button class="svc-mode" data-mode="systemd" onclick="switchSvcMode('systemd')">systemd</button>
+          <button class="svc-mode active" data-mode="systemd" onclick="switchSvcMode('systemd')">systemd</button>
+          <button class="svc-mode" data-mode="tmux" onclick="switchSvcMode('tmux')">tmux</button>
         </div>
         <div class="svc-search-wrap">
           <input type="text" id="svcSearch" class="svc-search" placeholder="Filter services…" oninput="filterServices()">
