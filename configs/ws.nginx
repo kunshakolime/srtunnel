@@ -1,6 +1,7 @@
 # ── nginx stream front for ws-sr ────────────────────────────────────────────
 # All public ports proxy to ws-sr's private upstream on 127.0.0.1:18081.
-# Deployed by scripts/debinstall.sh → /etc/nginx/stream-enabled/ws.
+# Deployed by scripts/debinstall.sh → /etc/nginx/stream-available/ws,
+# symlinked from /etc/nginx/stream-enabled/ws.
 
 log_format ws_bytes '$remote_addr [$time_local] $protocol $status '
                     '$bytes_sent $bytes_received $session_time';
