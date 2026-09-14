@@ -79,8 +79,9 @@ cp configs/xray.template.json configs/xray.json
 echo "Hardwired config copied to configs/config.yaml / configs/xray.json — edit manually if needed."
 
 # ── nginx stream front for ws-sr ──────────────────────────────────────────
-mkdir -p /etc/nginx/stream-enabled
-sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/ws.nginx > /etc/nginx/stream-enabled/ws
+mkdir -p /etc/nginx/stream-available /etc/nginx/stream-enabled
+sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/ws.nginx > /etc/nginx/stream-available/ws
+ln -sf /etc/nginx/stream-available/ws /etc/nginx/stream-enabled/ws
 if ! grep -q "stream-enabled" /etc/nginx/nginx.conf; then
     sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
 fi
