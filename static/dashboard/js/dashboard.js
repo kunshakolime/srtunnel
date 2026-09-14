@@ -50,6 +50,7 @@ async function loadDashboard() {
         <div class="metric">
           <div class="metric-label">Connections</div>
           <div class="metric-value connections-val" id="m-conns">${conns}</div>
+          <div class="metric-sub" id="m-conns-sub">↓ ${d.bandwidth?.rx || '—'} · ↑ ${d.bandwidth?.tx || '—'}</div>
         </div>`;
       metricsEl.dataset.built = '1';
     } else {
@@ -66,9 +67,8 @@ async function loadDashboard() {
       document.getElementById('m-disk-sub').textContent = `${parseFloat(d.disk_used||0).toFixed(2)} / ${parseFloat(d.disk_total||0).toFixed(1)} GB`;
       document.getElementById('m-ip').textContent = d.ip || '—';
       document.getElementById('m-conns').textContent = conns;
+      document.getElementById('m-conns-sub').textContent = `↓ ${d.bandwidth?.rx || '—'} · ↑ ${d.bandwidth?.tx || '—'}`;
     }
-    document.getElementById('bwDown').textContent = d.bandwidth?.rx || '—';
-    document.getElementById('bwUp').textContent = d.bandwidth?.tx || '—';
     markRefresh();
     loadPorts();
   } catch (e) {
