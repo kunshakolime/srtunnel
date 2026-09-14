@@ -26,7 +26,7 @@ case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 # ── APT Dependencies ──────────────────────────────────────────────────────────
 echo "Installing base dependencies..."
 apt update -qq
-apt install -y -qq git openssh-server stunnel4 python3 python3-certbot tmux curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
+apt install -y -qq git openssh-server stunnel4 python3 certbot tmux curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
 
 # ── Python deps (Debian python3- equivalents of requirements.txt) ───────────
 # requirements.txt: fastapi, uvicorn, requests, httpx, ruamel.yaml, psutil, PyYAML,
