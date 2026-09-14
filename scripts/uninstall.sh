@@ -71,6 +71,7 @@ echo "[5/8] Reverting Nginx configuration..."
 rm -f /etc/nginx/sites-enabled/srtdash
 rm -f /etc/nginx/sites-available/srtdash
 rm -f /etc/nginx/stream-enabled/srtdash
+rm -f /etc/nginx/stream-enabled/ws
 rmdir --ignore-fail-on-non-empty /etc/nginx/stream-enabled 2>/dev/null || true
 
 # Remove the stream {} block we injected into nginx.conf
