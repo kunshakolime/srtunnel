@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/websocket -c configs/config.yaml
+ExecStart=/opt/srtunnel/bin/ws-sr -c configs/config.yaml
 Restart=always
 RestartSec=2
 
