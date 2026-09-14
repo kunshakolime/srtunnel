@@ -49,21 +49,18 @@ telegram_bot:
   xray_inbound_tag: "xray-vless"
 websocket:
   # WebSocket Tunnel Server Configuration
+  # NOTE: plain HTTP only, bound to localhost. nginx owns the public sockets
+  # and TLS termination and proxy_passes into the port(s) below.
+  # 18081 is the private upstream — never expose it publicly.
   ports: # Port Configuration
-    http: [80, 8080, 8000, 8880]      # HTTP ports (plain text)
-    https: [8446]                      # HTTPS ports (SSL/TLS)
-    enable_ssl: true                   # Enable HTTPS servers
+    http: [18081]                        # plain-HTTP listener(s) for nginx upstreams
   backend: # Backend Server (SSH, telnet, etc.)
     host: "127.0.0.1"
     port: 22
     max_retries: 3
     retry_delay: 0.5
-  ssl:
-    cert_file: "./server.crt"
-    key_file: "./server.key"
-    min_tls_version: "1.2"
   server:
-    bind_address: "0.0.0.0"
+    bind_address: "127.0.0.1"
     max_connections: 1000
     buffer_size: 8192
   timeouts:
@@ -76,10 +73,6 @@ websocket:
     custom_response_text: ""
   performance:
     enable_nodelay: true
-    enable_keepalive: true
-    keepalive_idle: 60
-    keepalive_interval: 10
-    keepalive_count: 3
   logging:
     level: "INFO"
     format: "detailed"
