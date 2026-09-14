@@ -26,6 +26,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+# show this process as "ws-sr", not "python3" (PR_SET_NAME)
+import ctypes
+try:
+    ctypes.CDLL(None).prctl(15, b"ws-sr", 0, 0, 0)
+except Exception:
+    pass
+
 # CONFIG
 class Config:
 
