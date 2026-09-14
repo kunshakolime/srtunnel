@@ -102,12 +102,7 @@
               <button class="svc-search-x port-search-x" onclick="document.getElementById('portSearch').value='';filterPorts()">×</button>
             </div>
           </div>
-          <div class="table-wrap" style="max-height:320px;overflow:auto">
-            <table>
-              <thead><tr><th>Port</th><th>Proto</th><th>Listen</th><th>PID</th><th>Process</th></tr></thead>
-              <tbody id="portsBody"></tbody>
-            </table>
-          </div>
+          <div class="port-list" id="portsBody" style="max-height:320px"></div>
         </div>
 
         <div class="dash-side">
