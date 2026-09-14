@@ -90,13 +90,37 @@ async function loadPorts() {
     if (!res.ok) { el.innerHTML = ''; return; }
     const rows = await res.json();
     const protoColor = p => p === 'udp' ? 'var(--accent)' : 'var(--green)';
-    el.innerHTML = rows.map(r => `
+
+    // group by process+pid: same process holding many ports → one row
+    const groups = new Map();
+    for (const r of rows) {
+      const key = (r.pid != null ? r.pid : '?') + '|' + (r.process || 'kernel');
+      let g = groups.get(key);
+      if (!g) {
+        g = { pid: r.pid, process: r.process || 'kernel', addrs: new Set(), protoPorts: new Map() };
+        groups.set(key, g);
+      }
+      g.addrs.add(r.address);
+      if (!g.protoPorts.has(r.proto)) g.protoPorts.set(r.proto, []);
+      g.protoPorts.get(r.proto).push(r.port);
+    }
+    const list = [...groups.values()].map(g => ({
+      pid: g.pid,
+      process: g.process,
+      addrs: [...g.addrs],
+      protoPorts: [...g.protoPorts.entries()].map(([p, ports]) => [p, [...new Set(ports)].sort((a, b) => a - b)])
+    })).sort((a, b) => {
+      const m = g => g.protoPorts[0] ? g.protoPorts[0][1][0] : Infinity;
+      return m(a) - m(b);
+    });
+
+    el.innerHTML = list.map(g => `
       <tr>
-        <td style="font-family:var(--font-mono)"><strong>${r.port}</strong></td>
-        <td><span class="badge" style="background:${protoColor(r.proto)}1a;color:${protoColor(r.proto)}">${r.proto}</span></td>
-        <td style="font-family:var(--font-mono);font-size:12px">${r.address}</td>
-        <td style="font-family:var(--font-mono);font-size:12px;color:var(--text3)">${r.pid || '—'}</td>
-        <td>${r.process || 'kernel'}</td>
+        <td style="font-family:var(--font-mono)"><strong>${g.protoPorts.map(([p, ports]) => ports.join(', ')).join(' · ')}</strong></td>
+        <td>${g.protoPorts.map(([p, ports]) => `<span class="badge" style="background:${protoColor(p)}1a;color:${protoColor(p)};margin:1px 4px 1px 0">${p}</span>`).join('')}</td>
+        <td style="font-family:var(--font-mono);font-size:12px">${g.addrs.join('<br>')}</td>
+        <td style="font-family:var(--font-mono);font-size:12px;color:var(--text3)">${g.pid != null ? g.pid : '—'}</td>
+        <td>${g.process}</td>
       </tr>`).join('') ||
       '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:16px">No listeners</td></tr>';
     filterPorts();
