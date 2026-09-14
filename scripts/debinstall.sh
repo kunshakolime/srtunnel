@@ -78,8 +78,14 @@ cp configs/config.template.yaml configs/config.yaml
 cp configs/xray.template.json configs/xray.json
 echo "Hardwired config copied to configs/config.yaml / configs/xray.json — edit manually if needed."
 
-# nginx setup moved to scripts/setup-nginx.sh — run it separately if needed
-# (keeps debinstall minimal; dependencies still installed via apt)
+# ── nginx stream front for ws-sr ──────────────────────────────────────────
+mkdir -p /etc/nginx/stream-enabled
+sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/ws.nginx > /etc/nginx/stream-enabled/ws
+if ! grep -q "stream-enabled" /etc/nginx/nginx.conf; then
+    sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
+fi
+rm -f /etc/nginx/sites-enabled/default   # binds :80, conflicts with stream
+nginx -t && systemctl reload nginx 2>/dev/null || true
 
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
 ./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
@@ -121,4 +127,4 @@ for svc in ${SRTUNNEL_ENABLE:-badvpn ws-sr}; do
     systemctl enable --now "$svc" 2>/dev/null || true
 done
 
-echo "tunnel up and running (nginx not configured — run ./scripts/setup-nginx.sh if needed)"
+echo "tunnel up and running (nginx stream front for ws-sr installed; dashboard vhost still needs ./scripts/setup-nginx.sh)"

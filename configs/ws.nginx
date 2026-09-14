@@ -1,10 +1,6 @@
-# ── nginx front for ws-sr ───────────────────────────────────────────────────
-# nginx owns every public socket + TLS termination and proxy_passes everything
-# to ws-sr's private upstream on 127.0.0.1:18081. ws-sr only fakes the
-# "HTTP/1.1 101 / 200" handshake and pipes to sshd — it binds nothing public.
-#
-# Install:  cp configs/nginx-ws.conf /etc/nginx/stream-enabled/ws
-#           (requires top-level:  stream { include /etc/nginx/stream-enabled/*; } )
+# ── nginx stream front for ws-sr ────────────────────────────────────────────
+# All public ports proxy to ws-sr's private upstream on 127.0.0.1:18081.
+# Deployed by scripts/debinstall.sh → /etc/nginx/stream-enabled/ws.
 
 log_format ws_bytes '$remote_addr [$time_local] $protocol $status '
                     '$bytes_sent $bytes_received $session_time';
@@ -34,8 +30,8 @@ server {
 server {
     listen 8446 ssl;
     listen 18443 ssl;
-    ssl_certificate     /opt/srtunnel/server.crt;
-    ssl_certificate_key /opt/srtunnel/server.key;
+    ssl_certificate     ${BOT_DIR}/server.crt;
+    ssl_certificate_key ${BOT_DIR}/server.key;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     proxy_pass 127.0.0.1:18081;
