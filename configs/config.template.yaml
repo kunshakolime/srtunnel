@@ -80,6 +80,9 @@ websocket:
     keepalive_idle: 60
     keepalive_interval: 10
     keepalive_count: 3
+  logging:
+    level: "INFO"
+    format: "detailed"
   monitoring:
     stats_interval: 60
     log_connections: true
