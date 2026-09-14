@@ -18,7 +18,6 @@ import argparse
 import logging
 import yaml
 import socket
-import ssl
 import time
 import hashlib
 import base64
@@ -77,26 +76,10 @@ class Config:
         self.response_text      = self.get('http',        'custom_response_text', default='')
         self.handle_split       = self.get('http',        'handle_split')
         self.enable_nodelay     = self.get('performance', 'enable_nodelay')
-        self.enable_keepalive   = self.get('performance', 'enable_keepalive')
-        self.keepalive_idle     = self.get('performance', 'keepalive_idle')
-        self.keepalive_intvl    = self.get('performance', 'keepalive_interval')
-        self.keepalive_count    = self.get('performance', 'keepalive_count')
         self.log_connections    = self.get('monitoring',  'log_connections')
         self.show_bytes_human   = self.get('monitoring',  'show_bytes_human',     default=True)
         self.stats_interval     = self.get('monitoring',  'stats_interval')
         self.ignore_early_reset = self.get('errors',      'ignore_early_reset')
-
-        # Enforce minimum buffer size to cover max TLS record (16KB + header).
-        # Smaller values cause "illegal packet size" errors on SSL connections
-        # because a single TLS record can't be read in one recv() call.
-        # Warning is deferred to after setup_logging() so it uses the right formatter.
-        self._buffer_warning = None
-        if self.buffer_size < 16385:
-            self._buffer_warning = (
-                f"buffer_size {self.buffer_size} is below TLS minimum (16385). "
-                "Raising to 65536 to prevent SSL packet-size errors."
-            )
-            self.buffer_size = 65536
 
     def get(self, *keys, default=None):
         value = self.data
@@ -113,9 +96,6 @@ class Config:
         handler   = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter(fmt))
         logging.basicConfig(level=log_level, handlers=[handler], force=True)
-        if self._buffer_warning:
-            logging.warning(self._buffer_warning)
-            self._buffer_warning = None
 
 
 def normalize_ports(ports) -> list:
@@ -197,9 +177,8 @@ class Handshake:
 # SERVER
 class TunnelServer:
 
-    def __init__(self, port: int, use_ssl: bool, config: Config):
+    def __init__(self, port: int, config: Config):
         self.port       = port
-        self.use_ssl    = use_ssl
         self.config     = config
         self.running    = False
         self.server     = None
@@ -216,11 +195,6 @@ class TunnelServer:
         self._total_bytes_received = 0
         self._stat_lock            = threading.Lock()
 
-        # --- IP rate-limit tables ---
-        self.ip_last_seen: Dict[str, float] = {}
-        self.ip_blacklist: Dict[str, float] = {}
-        self._ip_lock = threading.Lock()  # separate, narrower lock
-
         self.start_time = None
 
         # --- Thread pool replaces per-connection thread creation ---
@@ -235,73 +209,21 @@ class TunnelServer:
             thread_name_prefix=f"tunnel-{port}"
         )
 
-        self.ssl_context = None
-        if use_ssl:
-            self._setup_ssl()
-
-    def _setup_ssl(self):
-        try:
-            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            self.ssl_context.load_cert_chain(
-                certfile=self.config.get('ssl', 'cert_file'),
-                keyfile=self.config.get('ssl',  'key_file')
-            )
-            self.ssl_context.minimum_version = {
-                '1.0': ssl.TLSVersion.TLSv1,
-                '1.1': ssl.TLSVersion.TLSv1_1,
-                '1.2': ssl.TLSVersion.TLSv1_2,
-                '1.3': ssl.TLSVersion.TLSv1_3,
-            }.get(self.config.get('ssl', 'min_tls_version', default='1.2'), ssl.TLSVersion.TLSv1_2)
-        except FileNotFoundError as e:
-            logging.error(f"SSL cert/key not found: {e}")
-            raise
-        except Exception as e:
-            logging.error(f"SSL setup error: {e}")
-            raise
-
-    def reset(self):
-        """Reset socket/state flags for a clean restart, preserving lifetime stats."""
-        self._stopped = False
-        self.running  = False
-        self.server   = None
-
     def start(self):
         try:
             self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-            # SO_REUSEPORT lets the kernel load-balance accept() calls across
-            # threads/processes on the same port, reducing contention at scale.
-            if hasattr(socket, 'SO_REUSEPORT'):
-                try:
-                    self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-                except OSError:
-                    pass  # not supported on all kernels — safe to skip
-
-            if self.config.enable_keepalive:
-                self.server.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                for attr, val in [
-                    ('TCP_KEEPIDLE',  self.config.keepalive_idle),
-                    ('TCP_KEEPINTVL', self.config.keepalive_intvl),
-                    ('TCP_KEEPCNT',   self.config.keepalive_count),
-                ]:
-                    if hasattr(socket, attr):
-                        self.server.setsockopt(socket.IPPROTO_TCP, getattr(socket, attr), val)
-
             self.server.bind((self.config.bind_address, self.port))
             self.server.listen(self.config.max_connections)
 
-            logging.info(f"> {'HTTPS' if self.use_ssl else 'HTTP'} server listening on {self.config.bind_address}:{self.port}")
+            logging.info(f"> HTTP server listening on {self.config.bind_address}:{self.port}")
 
             self.running    = True
             self.start_time = self.start_time or time.time()
 
             if self.config.stats_interval and self.config.stats_interval > 0:
                 threading.Thread(target=self._stats_logger, daemon=True).start()
-
-            # Prune ip tables periodically to prevent unbounded memory growth
-            # under heavy churn or brute-force probing.
-            threading.Thread(target=self._prune_ip_tables, daemon=True).start()
 
             while self.running:
                 self.server.settimeout(1.0)
@@ -310,22 +232,7 @@ class TunnelServer:
                 except socket.timeout:
                     continue
 
-                ip  = address[0]
-                now = time.time()
-
-                with self._ip_lock:
-                    if now < self.ip_blacklist.get(ip, 0):
-                        client.close()
-                        continue
-
-                    last = self.ip_last_seen.get(ip)
-                    if last is not None and (now - last) < 0.1:
-                        self.ip_blacklist[ip] = now + 5
-                        logging.warning(f"Blacklisted {ip} for 5s: sub-second reconnect ({now - last:.3f}s)")
-                        client.close()
-                        continue
-
-                    self.ip_last_seen[ip] = now
+                ip = address[0]
 
                 # Check connection cap without locking (GIL-safe read on CPython).
                 if self._active_connections >= self.config.max_connections:
@@ -336,15 +243,6 @@ class TunnelServer:
                 # Increment before handing off so the cap check above stays accurate.
                 self._active_connections += 1
                 self._total_connections  += 1
-
-                if self.use_ssl and self.ssl_context:
-                    try:
-                        client = self.ssl_context.wrap_socket(client, server_side=True)
-                    except ssl.SSLError as e:
-                        logging.debug(f"SSL handshake failed: {address[0]} - {e}")
-                        self._active_connections -= 1
-                        client.close()
-                        continue
 
                 # Submit to pool instead of spawning a new thread each time.
                 self.executor.submit(self._handle_connection, client, address)
@@ -363,26 +261,6 @@ class TunnelServer:
                 except Exception:
                     pass
                 self.server = None
-
-    def run_supervised(self, shutdown_event: threading.Event):
-        """
-        Restart this server on crash with exponential backoff (5s → 10s → 20s → 40s → 60s cap).
-        Returns cleanly when shutdown_event is set or the server exits without error.
-        """
-        delay = 5
-        while not shutdown_event.is_set():
-            self.reset()
-            try:
-                self.start()
-            except Exception as e:
-                if shutdown_event.is_set():
-                    break
-                logging.error(f"[Recovery] Port {self.port} crashed: {e}")
-            else:
-                break   # clean shutdown — do not restart
-            logging.warning(f"[Recovery] Port {self.port}: restarting in {delay}s...")
-            shutdown_event.wait(timeout=delay)
-            delay = min(delay * 2, 60)
 
     def _backend_connect(self) -> Optional[socket.socket]:
         """Connect to the backend with retry logic."""
@@ -456,7 +334,7 @@ class TunnelServer:
         start_time                 = time.time()
 
         try:
-            logging.info(f"New connection: {address[0]}:{address[1]} [{'SSL' if self.use_ssl else 'Plain'}]")
+            logging.info(f"New connection: {address[0]}:{address[1]}")
 
             if cfg.enable_nodelay:
                 client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -539,21 +417,7 @@ class TunnelServer:
             logging.info(f"[Stats] Port {self.port}: Active={active}, Total={total}, "
                          f"↑{format_bytes(sent, self.config.show_bytes_human)} "
                          f"↓{format_bytes(recv, self.config.show_bytes_human)}, "
-                         f"Uptime={format_duration(time.time() - self.start_time)}")
-
-    def _prune_ip_tables(self):
-        """
-        Periodically evict stale entries from ip_blacklist and ip_last_seen.
-        Without this, both dicts grow unboundedly under heavy connection churn
-        or brute-force probing.
-        """
-        while self.running:
-            time.sleep(60)
-            now = time.time()
-            with self._ip_lock:
-                self.ip_blacklist = {ip: t for ip, t in self.ip_blacklist.items() if t > now}
-                cutoff = now - 300
-                self.ip_last_seen = {ip: t for ip, t in self.ip_last_seen.items() if t > cutoff}
+                          f"Uptime={format_duration(time.time() - self.start_time)}")
 
     def stop(self):
         if self._stopped:
@@ -593,33 +457,27 @@ def main():
     print(BANNER)
     print()
 
-    http_ports  = normalize_ports(config.get('ports', 'http'))
-    https_ports = normalize_ports(config.get('ports', 'https'))
-    enable_ssl  = config.get('ports', 'enable_ssl')
+    http_ports = normalize_ports(config.get('ports', 'http'))
 
     logging.info("=" * 60)
     logging.info(f"Backend: {config.backend_host}:{config.backend_port}")
     logging.info(f"HTTP Ports: {', '.join(map(str, http_ports))}")
-    if enable_ssl:
-        logging.info(f"HTTPS Ports: {', '.join(map(str, https_ports))}")
     if config.response_text:
         logging.info(f"Custom Response: '{config.response_text}'")
     if config.stats_interval and config.stats_interval > 0:
         logging.info(f"Stats Interval: {config.stats_interval}s")
     logging.info("=" * 60)
 
-    port_configs = [(p, False) for p in http_ports]
-    if enable_ssl:
-        port_configs += [(p, True) for p in https_ports]
-
     shutdown_event = threading.Event()
     servers        = []
     threads        = []
 
-    for port, use_ssl in port_configs:
-        server = TunnelServer(port, use_ssl=use_ssl, config=config)
+    for port in http_ports:
+        # No in-process restart loop: systemd (Restart=always) owns restarts.
+        # A dead listener thread ends the process via the liveness check below.
+        server = TunnelServer(port, config=config)
         servers.append(server)
-        t = threading.Thread(target=server.run_supervised, args=(shutdown_event,), daemon=False)
+        t = threading.Thread(target=server.start, daemon=False)
         t.start()
         threads.append(t)
 
