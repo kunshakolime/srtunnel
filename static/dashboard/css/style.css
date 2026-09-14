@@ -156,7 +156,7 @@ body{background:var(--bg1);color:var(--text1);font-family:var(--font-body);min-h
 .port-hdr h4{margin-bottom:0}
 
 /* ── PORT MAP ── */
-.port-list{overflow-y:auto}
+.port-list{overflow-y:auto;max-height:320px}
 .port-item{padding:7px 2px;border-bottom:1px solid var(--border)}
 .port-item:last-child{border-bottom:none}
 .port-line{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
@@ -399,9 +399,23 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
   /* content: less padding */
   .content { padding: 14px 12px; border-radius: 14px; }
 
+  /* dashboard: tighten vertical rhythm */
+  .section-header { margin-bottom: 12px; }
+  .card { padding: 12px; margin-bottom: 10px; }
+  .card h4 { margin-bottom: 10px; }
+  .dash-grid { gap: 10px; }
+
   /* metrics: 2-col grid on phone is fine, drop min-width */
-  .metric-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .metric { padding: 13px 12px; }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
+  .metric { padding: 10px 11px; }
+  .metric .bar-wrap { margin-top: 6px; }
+
+  /* port map: shorter list on phone */
+  .port-list { max-height: 220px; }
+
+  /* speedtest: slimmer on phone */
+  .speedtest-wrap { padding: 6px 0; }
+  .speedtest-bar { margin: 8px 0; }
 
   /* dashboard: stack the side column under the port map */
   .dash-grid { grid-template-columns: 1fr; }
