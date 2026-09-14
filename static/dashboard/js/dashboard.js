@@ -44,14 +44,11 @@ async function loadDashboard() {
           <div class="bar-wrap"><div class="bar" id="m-disk-bar" style="width:${disk}%;background:${barColor(disk)}"></div></div>
         </div>
         <div class="metric">
-          <div class="metric-label">Public IP</div>
-          <div class="metric-value" id="m-ip" style="font-size:15px;font-family:var(--font-mono)">${d.ip || '—'}</div>
-        </div>
-        <div class="metric">
           <div class="metric-label">Connections</div>
           <div class="metric-value connections-val" id="m-conns">${conns}</div>
           <div class="metric-sub" id="m-conns-sub">↓ ${d.bandwidth?.rx || '—'} · ↑ ${d.bandwidth?.tx || '—'}</div>
         </div>`;
+      document.getElementById('m-ip').textContent = d.ip || '—';
       metricsEl.dataset.built = '1';
     } else {
       document.getElementById('m-cpu').childNodes[0].textContent = cpu;
@@ -78,6 +75,14 @@ async function loadDashboard() {
     }
   }
   if (spinEl) spinEl.classList.remove('spinning');
+}
+
+// ── IP strip ────────────────────────────────────────────────────────────────
+
+function copyIp() {
+  const ip = document.getElementById('m-ip').textContent.trim();
+  if (!ip || ip === '…' || ip === '—') return;
+  navigator.clipboard.writeText(ip).then(() => toast('IP copied'));
 }
 
 // ── Ports in use ─────────────────────────────────────────────────────────────
