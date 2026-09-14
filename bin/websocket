@@ -25,7 +25,6 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, Any
-from logging.handlers import RotatingFileHandler
 
 # CONFIG
 class Config:
@@ -102,27 +101,11 @@ class Config:
 
     def setup_logging(self):
         log_level = getattr(logging, self.get('logging', 'level', default='INFO').upper())
-        log_file  = self.get('logging', 'file')
         fmt       = ('%(levelname)s: %(message)s' if self.get('logging', 'format') == 'simple'
                      else '%(asctime)s [%(levelname)s] %(message)s')
-        handlers  = [logging.StreamHandler(sys.stdout)]
-        if log_file:
-            try:
-                Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        
-                handlers.append(
-                    RotatingFileHandler(
-                        log_file,
-                        maxBytes=1 * 1024 * 1024,  # ✅ 1 MB limit
-                        backupCount=3,             # keep 3 old files
-                        encoding='utf-8'
-                    )
-                )
-            except Exception as e:
-                print(f"Warning: Could not create log file: {e}")
-        for h in handlers:
-            h.setFormatter(logging.Formatter(fmt))
-        logging.basicConfig(level=log_level, handlers=handlers, force=True)
+        handler   = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter(fmt))
+        logging.basicConfig(level=log_level, handlers=[handler], force=True)
         if self._buffer_warning:
             logging.warning(self._buffer_warning)
             self._buffer_warning = None
