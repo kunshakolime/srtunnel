@@ -89,7 +89,6 @@ async function loadPorts() {
     const res = await apiFetch('/api/ports');
     if (!res.ok) { el.innerHTML = ''; return; }
     const rows = await res.json();
-    const protoColor = p => p === 'udp' ? 'var(--accent)' : 'var(--green)';
 
     // group by process+pid: same process holding many ports → one row
     const groups = new Map();
@@ -97,32 +96,37 @@ async function loadPorts() {
       const key = (r.pid != null ? r.pid : '?') + '|' + (r.process || 'kernel');
       let g = groups.get(key);
       if (!g) {
-        g = { pid: r.pid, process: r.process || 'kernel', addrs: new Set(), protoPorts: new Map() };
+        g = { pid: r.pid, process: r.process || 'kernel', addrs: new Set(), ports: [] };
         groups.set(key, g);
       }
       g.addrs.add(r.address);
-      if (!g.protoPorts.has(r.proto)) g.protoPorts.set(r.proto, []);
-      g.protoPorts.get(r.proto).push(r.port);
+      g.ports.push({ port: r.port, proto: r.proto });
     }
-    const list = [...groups.values()].map(g => ({
-      pid: g.pid,
-      process: g.process,
-      addrs: [...g.addrs],
-      protoPorts: [...g.protoPorts.entries()].map(([p, ports]) => [p, [...new Set(ports)].sort((a, b) => a - b)])
-    })).sort((a, b) => {
-      const m = g => g.protoPorts[0] ? g.protoPorts[0][1][0] : Infinity;
-      return m(a) - m(b);
-    });
+    const WILDCARD = new Set(['0.0.0.0', '::', '']);
+    const list = [...groups.values()].map(g => {
+      const seen = new Set();
+      const ports = g.ports
+        .filter(x => { const k = x.proto + x.port; if (seen.has(k)) return false; seen.add(k); return true; })
+        .sort((a, b) => (a.proto === b.proto ? a.port - b.port : (a.proto === 'tcp' ? -1 : 1)));
+      return {
+        pid: g.pid,
+        process: g.process,
+        specific: [...g.addrs].filter(a => !WILDCARD.has(a)),
+        ports
+      };
+    }).sort((a, b) => (a.ports[0] ? a.ports[0].port : Infinity) - (b.ports[0] ? b.ports[0].port : Infinity));
 
     el.innerHTML = list.map(g => `
-      <tr>
-        <td style="font-family:var(--font-mono)"><strong>${g.protoPorts.map(([p, ports]) => ports.join(', ')).join(' · ')}</strong></td>
-        <td>${g.protoPorts.map(([p, ports]) => `<span class="badge" style="background:${protoColor(p)}1a;color:${protoColor(p)};margin:1px 4px 1px 0">${p}</span>`).join('')}</td>
-        <td style="font-family:var(--font-mono);font-size:12px">${g.addrs.join('<br>')}</td>
-        <td style="font-family:var(--font-mono);font-size:12px;color:var(--text3)">${g.pid != null ? g.pid : '—'}</td>
-        <td>${g.process}</td>
-      </tr>`).join('') ||
-      '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:16px">No listeners</td></tr>';
+      <div class="port-item">
+        <div class="port-line">
+          <span class="port-name">${escHtml(g.process)}</span>
+          <span class="port-meta">${g.pid != null ? g.pid : '—'}${g.specific.length ? ' · ' + g.specific.map(escHtml).join(' · ') : ''}</span>
+        </div>
+        <div class="port-chips">
+          ${g.ports.map(x => `<span class="port-chip${x.proto === 'udp' ? ' udp' : ''}">${x.port}</span>`).join('')}
+        </div>
+      </div>`).join('') ||
+      '<div class="port-empty">No listeners</div>';
     filterPorts();
   } catch (e) { el.innerHTML = ''; }
 }
@@ -131,8 +135,8 @@ function filterPorts() {
   const q = document.getElementById('portSearch').value.toLowerCase();
   const x = document.querySelector('.port-search-x');
   if (x) x.classList.toggle('visible', q.length > 0);
-  document.querySelectorAll('#portsBody tr').forEach(tr => {
-    tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+  document.querySelectorAll('#portsBody .port-item').forEach(it => {
+    it.style.display = it.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 }
 
