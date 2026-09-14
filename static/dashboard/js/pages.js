@@ -36,7 +36,7 @@ async function _tickLogStream() {
 let _svcLogLines = 20;
 let _expandedLogs = new Set();
 let _svcData = [];
-let _svcMode = 'tmux';
+let _svcMode = 'systemd';
 
 async function loadServices() {
   const el = document.getElementById('servicesList');
@@ -110,7 +110,7 @@ function filterServices() {
   const q = document.getElementById('svcSearch').value.toLowerCase();
   const x = document.querySelector('.svc-search-x');
   if (x) x.classList.toggle('visible', q.length > 0);
-  const cards = document.querySelectorAll('#servicesList .card');
+  const cards = document.querySelectorAll('#servicesList .svc-card');
   cards.forEach((card, i) => {
     if (i >= _svcData.length) return;
     card.style.display = _svcData[i].name.toLowerCase().includes(q) ? '' : 'none';
