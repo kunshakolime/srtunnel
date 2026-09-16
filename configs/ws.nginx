@@ -8,9 +8,10 @@ log_format ws_bytes '$remote_addr [$time_local] $protocol $status '
 
 limit_conn_zone $binary_remote_addr zone=ws_ip:10m;
 
-# ── all plain ports: production (80, 2086, 8000, 8080, 8880) + test (18080) ─
+# ── plain ports: production (2086, 8000, 8080, 8880) + test (18080) ─────────
+# NOTE: port 80 moved to the http vhost (sites-available/ws) — L7 routing
+# for /cockpit paths. Raw-SSH clients must use the ports below.
 server {
-    listen 80;
     listen 2086;
     listen 8000;
     listen 8080;
