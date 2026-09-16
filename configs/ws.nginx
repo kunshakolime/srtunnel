@@ -8,15 +8,14 @@ log_format ws_bytes '$remote_addr [$time_local] $protocol $status '
 
 limit_conn_zone $binary_remote_addr zone=ws_ip:10m;
 
-# ── plain ports: production (2086, 8000, 8080, 8880) + test (18080) ─────────
+# ── plain production ports (2086, 8000, 8080, 8880) ─────────────────────────
 # NOTE: port 80 moved to the http vhost (sites-available/ws) — L7 routing
-# for /cockpit paths. Raw-SSH clients must use the ports below.
+# for /admin paths. Raw-SSH clients must use the ports below.
 server {
     listen 2086;
     listen 8000;
     listen 8080;
     listen 8880;
-    listen 18080;
     proxy_pass 127.0.0.1:18081;
 
     proxy_connect_timeout 5s;
@@ -28,10 +27,9 @@ server {
     access_log /var/log/nginx/ws-access.log ws_bytes;
 }
 
-# ── all TLS ports: production 8446 + test 18443 ─────────────────────────────
+# ── TLS production port 8446 ────────────────────────────────────────────────
 server {
     listen 8446 ssl;
-    listen 18443 ssl;
     ssl_certificate     ${BOT_DIR}/server.crt;
     ssl_certificate_key ${BOT_DIR}/server.key;
     ssl_protocols TLSv1.2 TLSv1.3;
