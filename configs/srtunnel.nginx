@@ -48,6 +48,55 @@ server {
         proxy_read_timeout 300s;
     }
 
+    # single-path WS endpoints (backend 400s a valid handshake = alive)
+    location /srvlws {
+        proxy_pass http://127.0.0.1:18082;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host        $http_host;
+        proxy_set_header Upgrade     $http_upgrade;
+        proxy_set_header Connection  $http_connection;
+
+        proxy_read_timeout 300s;
+    }
+
+    location = /srvl { return 301 /srvl/; }
+
+    location /srvl/ {
+        proxy_pass http://127.0.0.1:18083;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host        $http_host;
+        proxy_set_header Upgrade     $http_upgrade;
+        proxy_set_header Connection  $http_connection;
+
+        proxy_read_timeout 300s;
+    }
+
+    location = /srtr { return 301 /srtr/; }
+
+    location /srtr/ {
+        proxy_pass http://127.0.0.1:18084;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host        $http_host;
+        proxy_set_header Upgrade     $http_upgrade;
+        proxy_set_header Connection  $http_connection;
+
+        proxy_read_timeout 300s;
+    }
+
+    location /srtrws {
+        proxy_pass http://127.0.0.1:18085;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host        $http_host;
+        proxy_set_header Upgrade     $http_upgrade;
+        proxy_set_header Connection  $http_connection;
+
+        proxy_read_timeout 300s;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:18081;
         proxy_http_version 1.1;
