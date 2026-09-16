@@ -47,9 +47,17 @@ if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
 fi
 cd "$BOT_DIR"
 mkdir -p bin configs
-# binaries are in bin/deb13amd64 — keep them in bin/
-mv ./bin/deb13amd64/* ./bin/ 2>/dev/null || true
-rmdir ./bin/deb13amd64 2>/dev/null || true
+# binaries ship per-arch (bin/deb13amd64, bin/arm64) — flatten into bin/
+ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+case "$ARCH" in
+    amd64|x86_64)  ARCH_BIN="deb13amd64" ;;
+    arm64|aarch64) ARCH_BIN="arm64" ;;
+    *) die "Architecture $ARCH not supported." ;;
+esac
+if [ -d "./bin/$ARCH_BIN" ]; then
+    mv "./bin/$ARCH_BIN"/* ./bin/ 2>/dev/null || true
+    rmdir "./bin/$ARCH_BIN" 2>/dev/null || true
+fi
 chmod +x ./bin/* 2>/dev/null || true
 chmod +x ./* 2>/dev/null || true
 
@@ -58,6 +66,13 @@ mv ./bin/udp-zivpn-linux-amd64 ./bin/udp-zivpn 2>/dev/null || true
 mv ./bin/udp-custom-linux-amd64 ./bin/udp-custom 2>/dev/null || true
 mv ./bin/hysteria-linux-amd64-v1.3.5 ./bin/hysteria1 2>/dev/null || true
 mv ./bin/hysteria-linux-amd64-v2.7.0 ./bin/hysteria2 2>/dev/null || true
+
+# flag binaries this checkout has no build for (the arm64 set is incomplete)
+for b in badvpn-udpgw dbclient dnstt-client dnstt-server dropbear dropbear-pam \
+         dropbearconvert dropbearkey hysteria1 hysteria2 ipmask_tool \
+         traffic_meter_user ttyd udp-custom udp-zivpn xray; do
+    [ -x "./bin/$b" ] || echo "WARNING: no $ARCH build for $b — its service(s) will fail" >&2
+done
 
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"   geoip.dat
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat" geosite.dat
