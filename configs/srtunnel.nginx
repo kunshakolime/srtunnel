@@ -1,7 +1,7 @@
-# ── nginx http front: ws-sr tunnel + cockpit under /admin ───────────────────
+# ── nginx http front: ws-sr tunnel + cockpit under /srcockpit ───────────────────
 # One block, two listens (plain 80 + TLS 9443) — same routing both ways.
-# Default / passes to ws-sr's private upstream; /admin/ serves cockpit
-# (UrlRoot=/admin in cockpit.conf — the /cockpit/ prefix is reserved for
+# Default / passes to ws-sr's private upstream; /srcockpit/ serves cockpit
+# (UrlRoot=/srcockpit in cockpit.conf — the /cockpit/ prefix is reserved for
 # cockpit's own app URLs and breaks the shell). Prefix passes unstripped.
 # NOTE: only well-formed HTTP reaches ws-sr here — raw-SSH / payload-mode
 # clients must use the stream ports. Cockpit + direct :9090 must not share
@@ -15,9 +15,9 @@ server {
 
     access_log /var/log/nginx/ws-access.log;
 
-    location = /admin { return 301 /admin/; }
+    location = /srcockpit { return 301 /srcockpit/; }
 
-    location /admin/ {
+    location /srcockpit/ {
         proxy_pass http://127.0.0.1:9090;
         proxy_http_version 1.1;
         proxy_buffering off;
