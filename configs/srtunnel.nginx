@@ -8,6 +8,7 @@
 # one browser profile on one host, or their cookies fight over the same jar.
 server {
     listen 80;
+    listen 443 ssl;
     listen 9443 ssl;
     ssl_certificate     ${BOT_DIR}/server.crt;
     ssl_certificate_key ${BOT_DIR}/server.key;
