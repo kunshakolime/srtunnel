@@ -96,6 +96,9 @@ if [ -d /etc/cockpit ]; then
     systemctl restart cockpit 2>/dev/null || true
 fi
 
+# ── silence the default Debian warranty banner (/etc/motd) ───────────────
+: > /etc/motd
+
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
 ./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
 
