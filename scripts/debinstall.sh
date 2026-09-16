@@ -78,15 +78,23 @@ cp configs/config.template.yaml configs/config.yaml
 cp configs/xray.template.json configs/xray.json
 echo "Hardwired config copied to configs/config.yaml / configs/xray.json — edit manually if needed."
 
-# ── nginx stream front for ws-sr ──────────────────────────────────────────
+# ── nginx stream front for ws-sr + http front (tunnel + cockpit) ─────────
 mkdir -p /etc/nginx/stream-available /etc/nginx/stream-enabled
 sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/ws.nginx > /etc/nginx/stream-available/ws
 ln -sf /etc/nginx/stream-available/ws /etc/nginx/stream-enabled/ws
+sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/srtunnel.nginx > /etc/nginx/sites-available/srtunnel
+ln -sf /etc/nginx/sites-available/srtunnel /etc/nginx/sites-enabled/srtunnel
 if ! grep -q "stream-enabled" /etc/nginx/nginx.conf; then
     sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
 fi
 rm -f /etc/nginx/sites-enabled/default   # binds :80, conflicts with stream
 nginx -t && systemctl reload nginx 2>/dev/null || true
+
+# ── cockpit behind the http front (UrlRoot + ProtocolHeader) ─────────────
+if [ -d /etc/cockpit ]; then
+    cp -f "$BOT_DIR/configs/cockpit.conf" /etc/cockpit/cockpit.conf
+    systemctl restart cockpit 2>/dev/null || true
+fi
 
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
 ./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
