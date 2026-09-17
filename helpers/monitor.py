@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 _ip_cache = {"ip": None, "ts": 0}
 
-TRAFFIC_CACHE     = Path(__file__).resolve().parent.parent / "traffic_totals.json"
-ROTATE_THRESHOLD  = 100_000  # lines per file before rotating
+TRAFFIC_CACHE = Path(__file__).resolve().parent.parent / "data" / "traffic_totals.json"
 
 
 # ── Connection tracking ───────────────────────────────────────────────────────
@@ -180,14 +179,8 @@ def _load_cache():
     except Exception:
         return {}
 
-def _save_cache(data):
-    try:
-        TRAFFIC_CACHE.write_text(json.dumps(data))
-    except Exception as e:
-        logger.error("traffic cache write failed: %s", e)
-
-def _get_totals_awk(filepath):
-    """Sum in/out bytes from a traffic log file using awk. Fast even on millions of lines."""
+def _sum_traffic(filepath):
+    """Sum in/out bytes from a traffic log file using awk."""
     try:
         result = subprocess.run(
             ["awk", "-F,", "/^in/{i+=$2} /^out/{o+=$2} END{print i+0, o+0}", filepath],
@@ -197,26 +190,8 @@ def _get_totals_awk(filepath):
         if len(parts) == 2:
             return int(parts[0]), int(parts[1])
     except Exception as e:
-        logger.error("_get_totals_awk %s: %s", filepath, e)
+        logger.error("_sum_traffic %s: %s", filepath, e)
     return 0, 0
-
-def _line_count(filepath):
-    try:
-        result = subprocess.run(["wc", "-l", filepath], capture_output=True, text=True)
-        return int(result.stdout.split()[0])
-    except Exception:
-        return 0
-
-def _rotate_if_needed(filepath, uid_key):
-    if _line_count(filepath) < ROTATE_THRESHOLD:
-        return
-    total_in, total_out = _get_totals_awk(filepath)
-    cache = _load_cache()
-    prev  = cache.get(uid_key, {"in": 0, "out": 0})
-    cache[uid_key] = {"in": prev["in"] + total_in, "out": prev["out"] + total_out}
-    _save_cache(cache)
-    open(filepath, "w").close()  # truncate
-    logger.info("Rotated %s — cumulative in=%d out=%d", filepath, cache[uid_key]["in"], cache[uid_key]["out"])
 
 def _get_username(uid):
     try:
@@ -225,7 +200,10 @@ def _get_username(uid):
         return f"uid:{uid}"
 
 def all_user_traffic():
-    """Returns list of dicts with per-user traffic totals, including historical data."""
+    """Returns list of dicts with per-user traffic totals, including historical data.
+
+    Rotation is handled by bin/traffic_wrapper.py — this only reads.
+    """
     cache = _load_cache()
     results = []
     for log_file in glob.glob("/tmp/traffic_user_*.log"):
@@ -234,8 +212,7 @@ def all_user_traffic():
             continue
         uid     = match.group(1)
         uid_key = f"uid_{uid}"
-        _rotate_if_needed(log_file, uid_key)
-        live_in, live_out = _get_totals_awk(log_file)
+        live_in, live_out = _sum_traffic(log_file)
         cached    = cache.get(uid_key, {"in": 0, "out": 0})
         total_in  = cached["in"]  + live_in
         total_out = cached["out"] + live_out
