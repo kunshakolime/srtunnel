@@ -23,15 +23,6 @@ def update_config_status(name, new_status):
         mgr[key] = seq
     yaml_rt.dump(conf, CONFIG_FILE)
 
-def check_api():
-    try:
-        import urllib.request, ssl
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        return urllib.request.urlopen(f"{API_URL}/api/health", timeout=1, context=ctx).status == 200
-    except: return False
-
 class Manager:
     def __init__(self):
         self.selected = self.scroll = 0
@@ -39,7 +30,6 @@ class Manager:
         self.refresh()
 
     def refresh(self):
-        self.api_online = check_api()
         raw = watcher.list_services(lines=0) or []
         mgr_svcs = load_conf().get("manager", {}).get("services", {})
         self.services = []
@@ -53,7 +43,6 @@ class Manager:
         h, w = stdscr.getmaxyx()
         stdscr.erase()
         stdscr.addstr(0, 1, " SRTUNNEL ", curses.A_BOLD)
-        stdscr.addstr(0, w-10, " ● API ", curses.color_pair(1 if self.api_online else 2))
         stdscr.attron(curses.A_DIM)
         stdscr.hline(1, 0, curses.ACS_HLINE, w)
         stdscr.addstr(3, 0, f"  {'STATE':<7} {'MODE':<5} {'NAME':<15} COMMAND"[:w-1])

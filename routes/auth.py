@@ -23,10 +23,6 @@ class RevokeRequest(BaseModel):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@router.get("/health")
-def health():
-    return {"status": "ok"}
-
 @router.post("/login")
 def login(data: LoginRequest):
     if not verify_linux_login(data.username, data.password):
