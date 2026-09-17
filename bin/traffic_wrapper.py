@@ -20,6 +20,15 @@ import sys
 import time
 from pathlib import Path
 
+import ctypes
+import ctypes.util
+
+def _setproctitle(name):
+    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    libc.prctl(15, name.encode(), 0, 0, 0)  # 15 = PR_SET_NAME
+
+_setproctitle("trafficmeter")
+
 BOT_DIR   = Path(__file__).resolve().parent.parent
 DATA_DIR  = BOT_DIR / "data"
 BIN_DIR   = BOT_DIR / "bin"
