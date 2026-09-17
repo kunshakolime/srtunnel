@@ -5,7 +5,7 @@ from typing import Optional, Dict
 from pathlib import Path
 import logging, traceback
 
-from helpers import monitor, dns, speedtest as st, services as svc_helper
+from helpers import monitor, dns, speedtest as st
 from helpers.deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
@@ -152,10 +152,6 @@ def set_serverlist(data: ServerListRequest, user: CurrentUser):
     save_serverlist([s.dict() for s in data.servers])
     logger.info("Serverlist updated by %s (%d entries)", user, len(data.servers))
     return {"status": "saved"}
-
-@router.get("/serverlist/status")
-def get_serverlist_status(user: CurrentUser):
-    return svc_helper._load_serverlist() or []
 
 
 # ── Backup / Restore ──────────────────────────────────────────────────────────

@@ -45,7 +45,6 @@ async def lifespan(app: FastAPI):
         core.init(cfg)
         dns.init(cfg)
         core.init_db()
-        svc_helper.start_server_monitor()
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
     except Exception as e:
         logger.critical("startup failed: %s — %s", type(e).__name__, e)
