@@ -4,9 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-# loader opens traffic_meter.bpf.o by relative path — must run from bin/
-WorkingDirectory=/opt/srtunnel/bin
-ExecStart=/opt/srtunnel/bin/traffic_meter_user
+WorkingDirectory=/opt/srtunnel
+ExecStart=/usr/bin/python3 /opt/srtunnel/bin/traffic_wrapper.py
 Restart=always
 RestartSec=2
 
