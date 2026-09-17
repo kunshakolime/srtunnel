@@ -171,45 +171,6 @@ async function doLogin() {
   }
 }
 
-// ── Online-status cache ───────────────────────────────────────────────────────
-
-// ── Server status: read from API-maintained serverlist.json ──────────────────
-// The API loops every 30s pinging servers and writing online/last_seen back.
-// Dashboard just fetches /api/serverlist/status every 20s and updates dots.
-
-const STATUS_INTERVAL = 20_000;
-let _statusTimer  = null;
-let _statusCache  = {};   // url -> { online, last_seen }
-
-async function _fetchServerStatus() {
-  try {
-    const res = await apiFetch('/api/serverlist/status');
-    if (!res.ok) return;
-    const text = await res.text();
-    if (!text || !text.trim().startsWith('[')) return;
-    const servers = JSON.parse(text);
-    const active = getActiveServer();
-    for (const s of servers) {
-      const online = s.url === active?.url ? true : (s.online ?? false);
-      _statusCache[s.url] = { online, last_seen: s.last_seen };
-      const dot = document.getElementById('hub-dot-' + s.id);
-      if (dot) dot.className = 'server-dot ' + (online ? 'online' : 'offline');
-    }
-  } catch { /* silent — dots stay as-is */ }
-}
-
-function _startHealthLoop() {
-  clearInterval(_statusTimer);
-  _fetchServerStatus();
-  _statusTimer = setInterval(() => {
-    if (!document.hidden) _fetchServerStatus();
-  }, STATUS_INTERVAL);
-}
-
-function checkServerOnline(url) {
-  return _statusCache[url]?.online ?? false;
-}
-
 // ── Hub ───────────────────────────────────────────────────────────────────────
 
 async function renderHub() {
@@ -221,12 +182,9 @@ async function renderHub() {
   const active = getActiveServer();
   container.innerHTML = list.map(s => {
     const isActive = s.url === active?.url;
-    const cached = _statusCache[s.url];
-    const dotClass = isActive ? 'online' : (cached ? (cached.online ? 'online' : 'offline') : 'checking');
     const isHome   = s.url === HOME_API;
     return `
     <div class="hub-server ${s.id === activeId ? 'active' : ''}" id="hub-srv-${s.id}" onclick="switchServer('${s.id}')">
-      <div class="server-dot ${dotClass}" id="hub-dot-${s.id}"></div>
       <div class="hub-srv-info">
         <div class="hub-srv-name">${isHome ? '👑 ' : ''}${escHtml(s.name)}</div>
         <div class="hub-srv-url" title="${escHtml(s.url)}" onclick="event.stopPropagation();navigator.clipboard.writeText('${escHtml(s.url)}').then(()=>toast('URL copied'))">${escHtml(s.url)}</div>
@@ -260,7 +218,6 @@ function start() {
   document.getElementById('topUser').textContent = active?.name || '—';
   _sessionDead = false;
   renderHub();
-  _startHealthLoop();
   // load the current page (default: dashboard)
   showPage(_currentPage, document.querySelector('.nav button.active') || document.querySelector('.nav button'));
 }
@@ -291,7 +248,6 @@ function switchServer(id) {
   setActiveId(id);
   applyActive();
   renderHub();
-  _fetchServerStatus();  // refresh dots immediately instead of waiting for the 20s timer
   const active = getActiveServer();
   document.getElementById('topUser').textContent = active?.name || '—';
   showPage(_currentPage, document.querySelector('.nav button.active'));

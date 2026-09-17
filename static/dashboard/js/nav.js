@@ -121,14 +121,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// ── Hub dot state (driven by health-check loop in auth.js) ───────────────────
-
-function _setDot(serverId, state) {
-  const dot = document.getElementById('hub-dot-' + serverId);
-  if (!dot) return;
-  dot.className = 'server-dot ' + state;
-}
-
 // ── Modal Helpers ─────────────────────────────────────────────────────────────
 
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
