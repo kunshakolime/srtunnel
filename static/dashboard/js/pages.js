@@ -435,7 +435,6 @@ function loadServersPage() {
               <td>
                 <span class="mono-cell dimmed">···${escHtml(s.token?.slice(-8) || '—')}</span>
               </td>
-              <td><div class="server-dot ${(_statusCache[s.url]?.online ? 'online' : _statusCache[s.url] ? 'offline' : 'checking')}" id="sp-dot-${s.id}" style="display:inline-block"></div></td>
               <td>
                 <div style="display:flex;gap:6px">
                   <button class="btn-sm" onclick="switchServer('${s.id}');showPage('dashboard',document.querySelector('.nav button'))">Switch</button>
