@@ -256,6 +256,7 @@ def _background_sampler(iface, interval=2):
             })
         except Exception as e:
             logger.error("background_sampler: %s", e)
+        time.sleep(interval)
 
 def start_sampler(iface):
     t = threading.Thread(target=_background_sampler, args=(iface,), daemon=True)

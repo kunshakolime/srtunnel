@@ -51,6 +51,8 @@ async def lifespan(app: FastAPI):
         logger.critical(traceback.format_exc())
         raise
     yield
+    if _xui_client and not _xui_client.is_closed:
+        await _xui_client.aclose()
     logger.info("srapi shutting down")
 
 app = FastAPI(lifespan=lifespan)
@@ -121,6 +123,7 @@ app.include_router(systemd.router)
 # ── 3x-ui proxy ─────────────────────────────────────────────────────────────
 
 _XUI_PANEL_CFG = None
+_xui_client = None
 
 def _get_xui_cfg():
     global _XUI_PANEL_CFG
@@ -132,6 +135,12 @@ def _get_xui_cfg():
         _XUI_PANEL_CFG = raw.get("xui_panel") or {}
     return _XUI_PANEL_CFG
 
+def _get_xui_client():
+    global _xui_client
+    if _xui_client is None or _xui_client.is_closed:
+        _xui_client = httpx.AsyncClient(verify=False, timeout=30)
+    return _xui_client
+
 @app.api_route("/3x-ui/{path:path}", methods=["GET","POST","PUT","DELETE","PATCH","OPTIONS","HEAD"])
 async def proxy_3xui(request: Request, path: str):
     panel = _get_xui_cfg()
@@ -141,8 +150,8 @@ async def proxy_3xui(request: Request, path: str):
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")}
     if panel.get("token"):
         headers["Authorization"] = f"Bearer {panel['token']}"
-    async with httpx.AsyncClient(verify=False) as client:
-        resp = await client.request(request.method, target, headers=headers, content=body, timeout=30)
+    client = _get_xui_client()
+    resp = await client.request(request.method, target, headers=headers, content=body)
     ct = resp.headers.get("content-type", "text/html")
     resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in ("content-length", "transfer-encoding", "content-type")}
     return Response(content=resp.content, status_code=resp.status_code, media_type=ct, headers=resp_headers)
