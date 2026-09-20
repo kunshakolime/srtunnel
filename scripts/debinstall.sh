@@ -132,8 +132,19 @@ usermod -aG srtadmin root 2>/dev/null || true
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 systemctl daemon-reload
-systemctl enable --now srapi 2>/dev/null || true
-for svc in ${SRTUNNEL_ENABLE:-badvpn ws-sr}; do
+# enable services listed in config.yaml manager.enable
+if command -v python3 &>/dev/null; then
+    ENABLED=$(python3 -c "
+import yaml, sys
+with open('configs/config.yaml') as f:
+    cfg = yaml.safe_load(f) or {}
+for s in (cfg.get('manager') or {}).get('enable') or []:
+    print(s)
+" 2>/dev/null)
+else
+    ENABLED="srapi ws-sr badvpn"
+fi
+for svc in $ENABLED; do
     systemctl enable --now "$svc" 2>/dev/null || true
 done
 

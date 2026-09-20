@@ -11,6 +11,7 @@ manager:
   - echo "starting..."
   - sleep 3
   enable:
+  - srapi
   - ws-sr
   - badvpn
   services:
