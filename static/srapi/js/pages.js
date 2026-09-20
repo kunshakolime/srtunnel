@@ -48,6 +48,8 @@ async function loadServices() {
 
   const services = d.services || [];
   _svcData = services;
+  const countEl = document.getElementById('svcCount');
+  if (countEl) countEl.textContent = services.length + ' services';
   if (!services.length) { el.innerHTML = '<p class="empty-state">No services configured</p>'; return; }
 
   const logSel = `
@@ -138,6 +140,8 @@ async function loadSystemdUnits() {
   const d = await res.json();
   const units = d.units || [];
   _svcData = units.map(u => ({ name: u.name }));
+  const countEl = document.getElementById('svcCount');
+  if (countEl) countEl.textContent = units.length + ' units';
   stopLogStream();
   el.innerHTML = units.map(u => {
     const running = u.active === 'active';
