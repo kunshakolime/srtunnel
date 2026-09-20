@@ -117,23 +117,6 @@ fi
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
 ./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
 
-cat > /etc/systemd/system/srapi.service << 'EOF'
-[Unit]
-Description=srtunnel API
-After=network.target
-
-[Service]
-ExecStart=/usr/bin/python3 /opt/srtunnel/app/srapi.py
-WorkingDirectory=/opt/srtunnel
-Restart=always
-KillMode=process
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=HOME=/root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 ln -sf /opt/srtunnel/configs/stunnel.conf /etc/stunnel/stunnel.conf 2>/dev/null || true
 
 # ── Install tunnel unit files ──────────────────────────────────────────────

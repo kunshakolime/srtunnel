@@ -1,0 +1,14 @@
+[Unit]
+Description=srtunnel API
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/srtunnel/app/srapi.py
+WorkingDirectory=/opt/srtunnel
+Restart=always
+KillMode=process
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target
