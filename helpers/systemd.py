@@ -16,28 +16,58 @@ def _run(cmd: List[str], timeout: int = 10) -> subprocess.CompletedProcess:
 
 
 def list_units(pattern: str = "*.service") -> List[dict]:
-    """List all systemd service units."""
+    """List all systemd service units.
+
+    Merges list-unit-files (all installed) with list-units (live state)
+    so every installed service appears, even if never started.
+    """
+    import json
+
+    # 1) live state from list-units
+    live = {}
     r = _run(["systemctl", "list-units", "--type=service", "--all", "--plain",
               "--no-legend", "--no-pager", "-o", "json"])
-    if r.returncode != 0 or not r.stdout.strip():
-        # fallback: parse tabular output
-        return _parse_list_units()
-    try:
-        import json
-        units = json.loads(r.stdout)
-        return [
-            {
-                "name":     u.get("unit", "").removesuffix(".service"),
-                "full":     u.get("unit", ""),
-                "load":     u.get("load", ""),
-                "active":   u.get("active", ""),
-                "sub":      u.get("sub", ""),
-                "description": u.get("description", ""),
-            }
-            for u in units
-        ]
-    except Exception:
-        return _parse_list_units()
+    if r.returncode == 0 and r.stdout.strip():
+        try:
+            for u in json.loads(r.stdout):
+                name = u.get("unit", "").removesuffix(".service")
+                if name:
+                    live[name] = {
+                        "load":     u.get("load", ""),
+                        "active":   u.get("active", ""),
+                        "sub":      u.get("sub", ""),
+                        "description": u.get("description", ""),
+                    }
+        except Exception:
+            pass
+
+    # 2) all installed unit files
+    installed = {}
+    r2 = _run(["systemctl", "list-unit-files", "--type=service", "--plain",
+               "--no-legend", "--no-pager", "-o", "json"])
+    if r2.returncode == 0 and r2.stdout.strip():
+        try:
+            for u in json.loads(r2.stdout):
+                name = u.get("unit_file", "").removesuffix(".service")
+                if name:
+                    installed[name] = u.get("state", "")
+        except Exception:
+            pass
+
+    # 3) merge: every installed unit appears, live state overlays
+    all_names = dict.fromkeys(list(installed) + list(live))
+    result = []
+    for name in all_names:
+        ls = live.get(name, {})
+        result.append({
+            "name":        name,
+            "full":        f"{name}.service",
+            "load":        ls.get("load", "not-loaded"),
+            "active":      ls.get("active", "inactive"),
+            "sub":         ls.get("sub", ""),
+            "description": ls.get("description", ""),
+        })
+    return result
 
 
 def _parse_list_units() -> List[dict]:
