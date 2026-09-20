@@ -171,6 +171,7 @@
           <button class="svc-mode" data-mode="tmux" onclick="switchSvcMode('tmux')">tmux</button>
         </div>
         <div class="svc-search-wrap">
+          <span id="svcCount" style="font-size:11px;color:var(--text3);font-family:var(--font-mono);margin-right:8px"></span>
           <input type="text" id="svcSearch" class="svc-search" placeholder="Filter services…" oninput="filterServices()">
           <button class="svc-search-x" onclick="document.getElementById('svcSearch').value='';filterServices()">×</button>
         </div>

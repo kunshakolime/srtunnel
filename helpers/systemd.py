@@ -18,8 +18,8 @@ def _run(cmd: List[str], timeout: int = 10) -> subprocess.CompletedProcess:
 def list_units(pattern: str = "*.service") -> List[dict]:
     """List all systemd service units."""
     r = _run(["systemctl", "list-units", "--type=service", "--all", "--plain",
-              "--no-legend", "--no-pager", "--plain", "-o", "json", f"--pattern={pattern}"])
-    if r.returncode != 0:
+              "--no-legend", "--no-pager", "-o", "json"])
+    if r.returncode != 0 or not r.stdout.strip():
         # fallback: parse tabular output
         return _parse_list_units()
     try:
