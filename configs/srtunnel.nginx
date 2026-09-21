@@ -1,14 +1,5 @@
-# ── nginx http front: ws-sr tunnel + cockpit under /srcockpit ───────────────────
-# One block, two listens (plain 80 + TLS 9443) — same routing both ways.
-# Default / passes to ws-sr's private upstream; /srcockpit/ serves cockpit
-# (UrlRoot=/srcockpit in cockpit.conf — the /cockpit/ prefix is reserved for
-# cockpit's own app URLs and breaks the shell). Prefix passes unstripped.
-# NOTE: only well-formed HTTP reaches ws-sr here — raw-SSH / payload-mode
-# clients must use the stream ports. Cockpit + direct :9090 must not share
-# one browser profile on one host, or their cookies fight over the same jar.
 server {
     listen 80;
-    listen 443 ssl;
     listen 9443 ssl;
     ssl_certificate     ${BOT_DIR}/server.crt;
     ssl_certificate_key ${BOT_DIR}/server.key;
@@ -24,8 +15,6 @@ server {
         proxy_buffering off;
         gzip off;
 
-        # Host WITH port ($http_host): cockpit matches it against the
-        # browser's Origin, and non-standard ports must not be stripped.
         proxy_set_header Host               $http_host;
         proxy_set_header X-Forwarded-Proto  $scheme;
         proxy_set_header Upgrade            $http_upgrade;
@@ -36,7 +25,6 @@ server {
         proxy_send_timeout    300s;
     }
 
-    # srapi dashboard: /srapi/* maps to backend /srapi/*
     location = /srapi { return 301 /srapi/; }
 
     location /srapi/ {
@@ -50,7 +38,6 @@ server {
         proxy_read_timeout 300s;
     }
 
-    # srapi backend: /api/* routes (login, users, system, services, etc.)
     location /api/ {
         proxy_pass http://127.0.0.1:57000;
         proxy_http_version 1.1;
@@ -75,7 +62,6 @@ server {
         proxy_read_timeout 300s;
     }
 
-    # single-path WS endpoints (backend 400s a valid handshake = alive)
     location /srvlws {
         proxy_pass http://127.0.0.1:18082;
         proxy_http_version 1.1;
@@ -129,7 +115,6 @@ server {
         proxy_http_version 1.1;
         proxy_buffering off;
 
-        # pass the client's handshake headers through untouched
         proxy_set_header Upgrade        $http_upgrade;
         proxy_set_header Connection     $http_connection;
         proxy_set_header Host           $http_host;
