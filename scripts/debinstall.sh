@@ -26,21 +26,9 @@ case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 # ── APT Dependencies ──────────────────────────────────────────────────────────
 echo "Installing base dependencies..."
 apt update -qq
-apt install -y -qq git openssh-server stunnel4 python3 certbot tmux curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
+apt install -y -qq git openssh-server stunnel4 python3 python3-venv certbot tmux curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
 
-# ── Python deps (Debian python3- equivalents of requirements.txt) ───────────
-# requirements.txt: fastapi, uvicorn, requests, httpx, ruamel.yaml, psutil, PyYAML,
-#                   python-pam, python-jose[cryptography], python-multipart, websockets
-apt install -y -qq \
-    python3-fastapi python3-uvicorn python3-requests python3-httpx \
-    python3-ruamel.yaml python3-psutil python3-yaml python3-pam \
-    python3-cryptography python3-jwcrypto \
-    python3-python-multipart python3-websockets python3-pip
-
-# python3-jose has no Debian package (only python3-josepy/joserfc); install via pip system-wide
-pip install --break-system-packages "python-jose[cryptography]" 2>/dev/null \
- || pip3 install --break-system-packages "python-jose[cryptography]" 2>/dev/null \
- || echo "WARNING: python-jose not installed — JWT auth may fail" >&2
+# ── Python deps are installed into a venv (see "Python venv" below) ─────────
 
 if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
@@ -76,6 +64,12 @@ done
 
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"   geoip.dat
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat" geosite.dat
+
+# ── Python venv ───────────────────────────────────────────────────────────────
+echo "Setting up Python venv..."
+[ -d "$BOT_DIR/venv" ] || python3 -m venv "$BOT_DIR/venv"
+"$BOT_DIR/venv/bin/pip" install --quiet --upgrade pip
+"$BOT_DIR/venv/bin/pip" install --quiet -r "$BOT_DIR/requirements.txt"
 
 ln -sf "$BOT_DIR/bin/srtunnel" /usr/sbin/srtunnel
 

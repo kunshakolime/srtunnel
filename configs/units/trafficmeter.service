@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/usr/bin/python3 /opt/srtunnel/bin/traffic_wrapper.py
+ExecStart=/opt/srtunnel/venv/bin/python /opt/srtunnel/bin/traffic_wrapper.py
 Restart=always
 RestartSec=2
 
