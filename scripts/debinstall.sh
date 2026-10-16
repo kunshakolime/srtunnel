@@ -79,6 +79,12 @@ cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 sshd_ensure "KexAlgorithms +diffie-hellman-group14-sha1"
 sshd_ensure "Banner $BOT_DIR/configs/bannerssh"
 sshd_ensure "UsePAM yes"
+# ws-sr/stunnel dial the backend from 127.0.0.1, so every tunnel user shares
+# one source address. OpenSSH 9.8+ PerSourcePenalties would let a single bad
+# client reject everyone else with the banner "Not allowed at this time" —
+# exempt loopback and lift the (global) pre-auth connection cap.
+sshd_ensure "PerSourcePenaltyExemptList 127.0.0.1/32,::1/128"
+sshd_ensure "MaxStartups 100:30:200"
 echo "/sbin/nologin" >> /etc/shells
 systemctl reload sshd || true
 
