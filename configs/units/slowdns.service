@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/dnstt-server -udp :8053 -privkey-file slowdns.key sd.example.com 127.0.0.1:22
+ExecStart=${BIN_DIR}/dnstt-server -udp :8053 -privkey-file slowdns.key sd.example.com 127.0.0.1:22
 Restart=always
 RestartSec=2
 

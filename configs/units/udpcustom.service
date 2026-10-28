@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/srtunnel
-ExecStart=/opt/srtunnel/bin/udp-custom -c configs/udp-custom.json
+ExecStart=${BIN_DIR}/udp-custom -c configs/udp-custom.json
 Restart=always
 RestartSec=2
 

@@ -32,6 +32,9 @@ from typing import Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 BOT_DIR = str(BASE_DIR)
 UNIT_DIR = BASE_DIR / "configs" / "units"
+# Third-party binaries live outside the checkout so `git clean` and repo
+# updates cannot touch them. Populated by scripts/debinstall.sh.
+BIN_DIR = Path("/usr/local/libexec/srtunnel")
 
 STATE_DIR = Path("/var/lib/srtunnel")
 STATE_FILE = STATE_DIR / "reconcile.json"
@@ -118,7 +121,9 @@ def targets() -> list[Target]:
 
 def _render(t: Target) -> bytes:
     data = t.text if t.text is not None else t.source.read_text()
-    data = data.replace("${BOT_DIR}", BOT_DIR).replace("/opt/srtunnel", BOT_DIR)
+    data = (data.replace("${BIN_DIR}", str(BIN_DIR))
+                .replace("${BOT_DIR}", BOT_DIR)
+                .replace("/opt/srtunnel", BOT_DIR))
     return data.encode()
 
 

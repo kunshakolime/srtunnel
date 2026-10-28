@@ -31,7 +31,9 @@ _setproctitle("trafficmeter")
 
 BOT_DIR   = Path(__file__).resolve().parent.parent
 DATA_DIR  = BOT_DIR / "data"
-BIN_DIR   = BOT_DIR / "bin"
+# traffic_meter_user + traffic_meter.bpf.o come from /usr/local/libexec/srtunnel
+# (installed by scripts/debinstall.sh); the .o is loaded relative to the meter's cwd.
+BIN_DIR   = Path(os.environ.get("SRTUNNEL_BIN_DIR", "/usr/local/libexec/srtunnel"))
 LOG_DIR   = Path("/tmp")
 CACHE     = DATA_DIR / "traffic_totals.json"
 METER     = BIN_DIR / "traffic_meter_user"

@@ -55,6 +55,7 @@ echo ""
 echo "[3/8] Removing symlinks..."
 
 rm -f /usr/sbin/srtunnel
+rm -rf /usr/local/libexec/srtunnel
 rm -f /etc/stunnel/stunnel.conf
 rm -f /etc/sysctl.d/99-srtunnel.conf
 rm -rf /var/lib/srtunnel

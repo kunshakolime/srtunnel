@@ -7,6 +7,8 @@ Scriptable entrypoint for srtunnel.
     srtunnel                     # same as `srtunnel status`
     srtunnel status [--json]
     srtunnel reconcile [--dry-run|--check] [--force] [--only NAMES] [--skip NAMES] [--json]
+    srtunnel bin                 # show where the release binaries are installed
+    srtunnel exec NAME [args]    # run one of them (not on PATH)
     srtunnel run                 # foreground srapi (replaces startsrapi.sh)
 """
 
@@ -23,6 +25,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+
+# Release binaries — kept off PATH, see binaries.lock.
+BIN_DIR = Path(os.environ.get("SRTUNNEL_BIN_DIR", "/usr/local/libexec/srtunnel"))
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -160,6 +165,29 @@ def cmd_version(args) -> int:
     return 0
 
 
+def cmd_bin(args) -> int:
+    print(BIN_DIR)
+    if not BIN_DIR.is_dir():
+        print("  (not installed — run scripts/debinstall.sh)", file=sys.stderr)
+        return 1
+    for p in sorted(BIN_DIR.iterdir()):
+        if p.is_file() and not p.name.startswith("."):
+            print(f"  {p.name}")
+    return 0
+
+
+def cmd_exec(args) -> int:
+    exe = BIN_DIR / args.name
+    if not exe.is_file():
+        print(f"{exe} not installed — run scripts/debinstall.sh", file=sys.stderr)
+        return 127
+    try:
+        os.execv(str(exe), [args.name, *args.args])
+    except OSError as e:
+        print(f"cannot exec {exe}: {e}", file=sys.stderr)
+        return 127
+
+
 # ── entrypoint ────────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -186,6 +214,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("run", help="run srapi in the foreground")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("bin", help="list the installed release binaries")
+    p.set_defaults(func=cmd_bin)
+
+    p = sub.add_parser("exec", help="run an installed binary: srtunnel exec NAME [args]")
+    p.add_argument("name")
+    p.add_argument("args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_exec)
 
     p = sub.add_parser("version", help="print the deployed commit")
     p.set_defaults(func=cmd_version)

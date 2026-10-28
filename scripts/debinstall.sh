@@ -34,32 +34,55 @@ if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
 fi
 cd "$BOT_DIR"
-mkdir -p bin configs
-# binaries ship per-arch (bin/deb13amd64, bin/arm64) — flatten into bin/
+
+# ── Release binaries ──────────────────────────────────────────────────────────
+# Third-party binaries are GitHub release assets (pinned in binaries.lock), not
+# tracked in git. They live outside the checkout so `git clean` and repo updates
+# cannot touch them. `srtunnel bin` / `srtunnel exec NAME` reach them.
+BIN_DIR="/usr/local/libexec/srtunnel"
 ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 case "$ARCH" in
-    amd64|x86_64)  ARCH_BIN="deb13amd64" ;;
-    arm64|aarch64) ARCH_BIN="arm64" ;;
+    amd64|x86_64)  ARCH=amd64 ;;
+    arm64|aarch64) ARCH=arm64 ;;
     *) die "Architecture $ARCH not supported." ;;
 esac
-if [ -d "./bin/$ARCH_BIN" ]; then
-    mv "./bin/$ARCH_BIN"/* ./bin/ 2>/dev/null || true
-    rmdir "./bin/$ARCH_BIN" 2>/dev/null || true
-fi
-chmod +x ./bin/* 2>/dev/null || true
+
+install_bins() {
+    local tmp tag want url
+    tmp="$(mktemp -d)"
+    curl -fsSL "${REPO}binaries.lock" -o "$tmp/binaries.lock" || die "cannot fetch binaries.lock"
+    tag="$(sed -n 's/^TAG=//p' "$tmp/binaries.lock")"
+    want="$(sed -n "s/^$ARCH=//p" "$tmp/binaries.lock")"
+    [[ -n "$tag" && -n "$want" ]] || die "binaries.lock has no $ARCH entry"
+    mkdir -p "$BIN_DIR"
+
+    if [[ "$(cat "$BIN_DIR/.release" 2>/dev/null)" == "$tag-$ARCH" ]]; then
+        echo "Binaries $tag ($ARCH) already installed in $BIN_DIR."
+    else
+        url="https://github.com/kunshakolime/srtunnel/releases/download/$tag/srtunnel-bins-$ARCH.tar.gz"
+        echo "Downloading $tag ($ARCH) binaries..."
+        curl -fsSL "$url" -o "$tmp/bins.tar.gz" || die "cannot download $url"
+        echo "$want  $tmp/bins.tar.gz" | sha256sum -c - >/dev/null 2>&1 \
+            || die "checksum mismatch for $url — refusing to install"
+        tar -xzf "$tmp/bins.tar.gz" -C "$BIN_DIR"
+        chmod 0755 "$BIN_DIR"/*
+        echo "$tag-$ARCH" > "$BIN_DIR/.release"
+    fi
+
+    # small per-arch artifacts built from this repo, kept version-coupled
+    for f in traffic_meter_user ipmask_tool; do
+        install -m0755 "bin/$ARCH/$f" "$BIN_DIR/$f"
+    done
+    install -m0644 "bin/$ARCH/traffic_meter.bpf.o" "$BIN_DIR/traffic_meter.bpf.o"
+    rm -rf "$tmp"
+}
+
+install_bins
 chmod +x ./* 2>/dev/null || true
 
-mv ./bin/badvpn-udpgw64 ./bin/badvpn-udpgw 2>/dev/null || true
-mv ./bin/udp-zivpn-linux-amd64 ./bin/udp-zivpn 2>/dev/null || true
-mv ./bin/udp-custom-linux-amd64 ./bin/udp-custom 2>/dev/null || true
-mv ./bin/hysteria-linux-amd64-v1.3.5 ./bin/hysteria1 2>/dev/null || true
-mv ./bin/hysteria-linux-amd64-v2.7.0 ./bin/hysteria2 2>/dev/null || true
-
-# flag binaries this checkout has no build for (the arm64 set is incomplete)
-for b in badvpn-udpgw dbclient dnstt-client dnstt-server dropbear dropbear-pam \
-         dropbearconvert dropbearkey hysteria1 hysteria2 ipmask_tool \
-         traffic_meter_user ttyd udp-custom udp-zivpn xray; do
-    [ -x "./bin/$b" ] || echo "WARNING: no $ARCH build for $b — its service(s) will fail" >&2
+# The arm64 bundle is a subset of amd64; warn instead of failing at service start.
+for b in badvpn-udpgw dropbear dnstt-server hysteria2 udp-custom udp-zivpn; do
+    [ -x "$BIN_DIR/$b" ] || echo "WARNING: no $ARCH build for $b — its service(s) will fail" >&2
 done
 
 fetch "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"   geoip.dat
@@ -88,7 +111,7 @@ rm -f /etc/nginx/sites-enabled/default
 : > /etc/motd
 
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
-./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
+"$BIN_DIR/dnstt-server" -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
 
 # ── Dashboard admin group ─────────────────────────────────────────────────────
 groupadd -f srtadmin 2>/dev/null || true

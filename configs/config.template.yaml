@@ -20,7 +20,6 @@ telegram_bot:
   bandwidth_down: "? Mbps"
   bandwidth_up: "? Mbps"
   xray_config: "/opt/srtunnel/configs/xray.json"
-  xray_binary: "/opt/srtunnel/bin/xray"
   xray_inbound_tag: "xray-vless"
 websocket:
   # WebSocket Tunnel Server Configuration

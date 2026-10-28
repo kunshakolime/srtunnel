@@ -1,0 +1,13 @@
+# Third-party binaries ship as GitHub release assets, not in git.
+#
+# The installer downloads the tarball for its arch from
+#   https://github.com/kunshakolime/srtunnel/releases/download/$TAG/srtunnel-bins-$ARCH.tar.gz
+# verifies it against the hash below, then extracts it into /usr/local/libexec/srtunnel.
+#
+# Publishing a new bundle:
+#   1. build srtunnel-bins-{arm64,amd64}.tar.gz + SHA256SUMS
+#   2. create a release with tag $TAG and upload all three files
+#   3. bump TAG and the per-arch hashes here
+TAG=bins-v1
+arm64=4712f7330c42e81e14081f302ab8d53d99853b4599b07ebaf805f1202daffa31
+amd64=df6ea1f4010f1c9210033a2396185524bd90a1ba3959dd37233aadcf6df2fd80

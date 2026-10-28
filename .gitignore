@@ -27,12 +27,8 @@ traffic_totals.json
 tmp/
 hello.txt
 
-# Flattened per-arch binaries (installer moves bin/<arch>/* into bin/ at install)
-bin/badvpn-udpgw
-bin/ipmask_tool
-bin/traffic_meter.bpf.o
-bin/traffic_meter_user
-bin/udp-zivpn
+# Third-party binaries live in /usr/local/libexec/srtunnel (release assets, see
+# binaries.lock) — never add them to the checkout.
 
 # Generated / downloaded assets
 geoip.dat
