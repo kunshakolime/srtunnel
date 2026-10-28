@@ -23,6 +23,9 @@ srtunnel reconcile            # render units/nginx/sshd/sysctl/stunnel
 srtunnel reconcile --check    # dry-run; exit 1 if anything is out of sync
 srtunnel bin                  # list the installed release binaries
 srtunnel exec hysteria2       # run one of them (they are not on PATH)
+srtunnel cert                 # show the current TLS certificate
+srtunnel cert -d example.com  # obtain/renew a Let's Encrypt certificate
+srtunnel cert --selfsigned    # generate a self-signed pair if missing
 srtunnel run                  # run srapi in the foreground
 ```
 
@@ -64,14 +67,23 @@ paths:
 | `fullchain.pem` | certificate + chain |
 | `privkey.pem` | private key |
 
-- `debinstall.sh -d DOMAIN` runs `certbot certonly --standalone` and points
-  those paths at `/etc/letsencrypt/live/DOMAIN/`. nginx is stopped for the
-  challenge and started again afterwards; the same pre/post hooks are stored in
-  the certbot renewal config, so `certbot.timer` renews without breaking.
-- Without `-d`, a self-signed pair (10 years) is generated if the files are
-  missing.
-- Renewal also restarts stunnel through a deploy hook, since it only reads the
-  certificate at startup.
+`srtunnel cert` owns both flows, so they are available long after the install:
+
+```bash
+srtunnel cert                              # paths, subject, issuer, expiry
+srtunnel cert -d example.com               # Let's Encrypt (certbot standalone)
+srtunnel cert -d example.com --force       # reissue even if not near expiry
+srtunnel cert --selfsigned                 # self-signed (10 years) if missing
+```
+
+`srtunnel cert -d` stops nginx for the HTTP-01 challenge and starts it again
+afterwards; the same pre/post hooks are stored in the certbot renewal config, so
+`certbot.timer` renews unattended. A `--force` issue or a renewal also restarts
+stunnel, which only reads the certificate at startup. If certbot fails, the
+previous certificate stays in place.
+
+`debinstall.sh -d DOMAIN` simply calls `srtunnel cert -d DOMAIN`; without `-d`
+it calls `srtunnel cert --selfsigned` so TLS services can start.
 
 ## Uninstall
 ```bash

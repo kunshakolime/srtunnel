@@ -9,6 +9,9 @@ Scriptable entrypoint for srtunnel.
     srtunnel reconcile [--dry-run|--check] [--force] [--only NAMES] [--skip NAMES] [--json]
     srtunnel bin                 # show where the release binaries are installed
     srtunnel exec NAME [args]    # run one of them (not on PATH)
+    srtunnel cert                # show the TLS certificate
+    srtunnel cert -d DOMAIN      # obtain/renew a Let's Encrypt certificate
+    srtunnel cert --selfsigned   # generate a self-signed pair if missing
     srtunnel run                 # foreground srapi (replaces startsrapi.sh)
 """
 
@@ -188,6 +191,39 @@ def cmd_exec(args) -> int:
         return 127
 
 
+def cmd_cert(args) -> int:
+    from helpers import certs
+
+    if args.selfsigned:
+        ok, msg = certs.self_signed(args.domain, force=args.force)
+        print(msg, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+
+    if args.domain:
+        ok, msg = certs.issue(args.domain, force=args.force)
+        print(msg)
+        return 0 if ok else 1
+
+    info = certs.describe()
+    if args.json:
+        print(json.dumps(info, indent=2))
+        return 0 if info["present"] else 1
+    if not info["present"]:
+        print(f"no certificate at {info['cert']} — run "
+              f"`srtunnel cert --selfsigned` or `srtunnel cert -d DOMAIN`",
+              file=sys.stderr)
+        return 1
+
+    print(info["cert"] + (f" -> {info['link']}" if info.get("link") else ""))
+    print(f"  subject  {info.get('subject', '?')}")
+    print(f"  issuer   {info.get('issuer', '?')}")
+    days = info.get("days_left")
+    print(f"  expires  {info.get('notAfter', '?')}"
+          + (f"  ({days} days)" if days is not None else ""))
+    print(f"  key      {info['key']}")
+    return 0
+
+
 # ── entrypoint ────────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,6 +258,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name")
     p.add_argument("args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_exec)
+
+    p = sub.add_parser("cert", help="show or obtain the TLS certificate")
+    p.add_argument("-d", "--domain", help="Let's Encrypt domain (or CN for --selfsigned)")
+    p.add_argument("--selfsigned", action="store_true",
+                   help="generate a self-signed pair if missing")
+    p.add_argument("--force", action="store_true",
+                   help="ignore the renewal window / replace the existing pair")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_cert)
 
     p = sub.add_parser("version", help="print the deployed commit")
     p.set_defaults(func=cmd_version)

@@ -48,6 +48,7 @@ if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
     git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
 fi
 cd "$BOT_DIR"
+srt() { "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" "$@"; }
 
 # ── Release binaries ──────────────────────────────────────────────────────────
 # Third-party binaries are GitHub release assets (pinned in binaries.lock), not
@@ -118,39 +119,13 @@ grep -qxF "/sbin/nologin" /etc/shells || echo "/sbin/nologin" >> /etc/shells
 echo "Config at configs/config.yaml / configs/xray.json — edit manually if needed."
 
 # ── TLS certificate ───────────────────────────────────────────────────────────
-# Every TLS consumer (stunnel, nginx :443/:9443/:8446, hysteria2, zivpn) reads
-# the same two paths, so they are stable regardless of how the cert was obtained.
-CERT="$BOT_DIR/fullchain.pem"
-KEY="$BOT_DIR/privkey.pem"
-
-if [[ ! -f "$CERT" || ! -f "$KEY" ]]; then
-    CN="${DOMAIN:-$(hostname -f 2>/dev/null || hostname)}"
-    echo "No certificate found — generating a self-signed one for $CN."
-    rm -f "$CERT" "$KEY"
-    openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-        -days 3650 -subj "/CN=$CN" -addext "subjectAltName=DNS:$CN" \
-        -keyout "$KEY" -out "$CERT" 2>/dev/null
-    chmod 644 "$CERT"
-    chmod 600 "$KEY"
-fi
-
+# fullchain.pem / privkey.pem are the stable paths every consumer reads.
+# `srtunnel cert` owns both the self-signed fallback and the certbot flow, so
+# the same code is available after installation.
+srt cert --selfsigned
 if [[ -n "$DOMAIN" ]]; then
-    echo "Requesting a Let's Encrypt certificate for $DOMAIN..."
-    # certbot standalone needs :80, and nginx owns it here — both the initial
-    # request and every renewal (hooks are stored in the renewal config).
-    systemctl stop nginx 2>/dev/null || true
-    if certbot certonly --standalone --non-interactive --agree-tos \
-            --register-unsafely-without-email --cert-name "$DOMAIN" -d "$DOMAIN" \
-            --pre-hook  'systemctl stop nginx 2>/dev/null || true' \
-            --post-hook 'systemctl start nginx 2>/dev/null || true' \
-            --deploy-hook 'systemctl try-restart stunnel 2>/dev/null || true'; then
-        ln -sfn "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT"
-        ln -sfn "/etc/letsencrypt/live/$DOMAIN/privkey.pem"  "$KEY"
-        echo "Using the Let's Encrypt certificate for $DOMAIN."
-    else
-        echo "WARNING: certbot failed for $DOMAIN — keeping the self-signed certificate." >&2
-    fi
-    systemctl start nginx 2>/dev/null || true
+    srt cert -d "$DOMAIN" \
+        || echo "WARNING: certbot failed for $DOMAIN — keeping the existing certificate." >&2
 fi
 
 # ── nginx: the default site binds :80 and conflicts with the stream front ────
@@ -168,6 +143,6 @@ usermod -aG srtadmin root 2>/dev/null || true
 
 # ── Render units, nginx, sshd drop-in, sysctl, stunnel, cockpit ───────────────
 echo "Reconciling system configuration..."
-"$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" reconcile
+srt reconcile
 
 echo "tunnel installed — 'srtunnel status' to inspect, 'srtunnel reconcile --dry-run' to check drift"
