@@ -13,10 +13,18 @@ echo "========================================"
 echo "  srtunnel Uninstall Script"
 echo "========================================"
 echo ""
-tmux kill-server 2>/dev/null || true
 # ── Stop & Disable Services ───────────────────────────────────────────────────
 echo ""
 echo "[1/8] Stopping and disabling services..."
+
+# srtunnel-owned units (read from the repo before it is removed)
+if [[ -d "$BOT_DIR/configs/units" ]]; then
+    for u in "$BOT_DIR"/configs/units/*.service; do
+        svc=$(basename "$u" .service)
+        systemctl stop "$svc" 2>/dev/null || true
+        systemctl disable "$svc" 2>/dev/null || true
+    done
+fi
 
 for svc in srapi stunnel4 nginx; do
     if systemctl is-active --quiet "$svc" 2>/dev/null; then
@@ -33,7 +41,13 @@ done
 echo ""
 echo "[2/8] Removing systemd unit files..."
 
-rm -f /etc/systemd/system/srapi.service
+if [[ -d "$BOT_DIR/configs/units" ]]; then
+    for u in "$BOT_DIR"/configs/units/*.service; do
+        rm -f "/etc/systemd/system/$(basename "$u")"
+    done
+else
+    rm -f /etc/systemd/system/{srapi,ws-sr,badvpn,dropbear,hysteria2,pystunnel,slowdns,stunnel,telegrambot,trafficmeter,udpcustom,zivpn}.service
+fi
 systemctl daemon-reload
 
 # ── Remove Symlinks ───────────────────────────────────────────────────────────
@@ -42,10 +56,14 @@ echo "[3/8] Removing symlinks..."
 
 rm -f /usr/sbin/srtunnel
 rm -f /etc/stunnel/stunnel.conf
+rm -f /etc/sysctl.d/99-srtunnel.conf
+rm -rf /var/lib/srtunnel
 
 # ── Revert SSH Config ─────────────────────────────────────────────────────────
 echo ""
 echo "[4/8] Reverting SSH configuration..."
+
+rm -f /etc/ssh/sshd_config.d/srtunnel.conf
 
 if [[ -f /etc/ssh/sshd_config.bak ]]; then
     cp /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
@@ -68,6 +86,8 @@ fi
 echo ""
 echo "[5/8] Reverting Nginx configuration..."
 
+rm -f /etc/nginx/sites-enabled/srtunnel
+rm -f /etc/nginx/sites-available/srtunnel
 rm -f /etc/nginx/sites-enabled/srtdash
 rm -f /etc/nginx/sites-available/srtdash
 rm -f /etc/nginx/stream-enabled/srtdash
@@ -98,7 +118,7 @@ if confirm "  Remove packages installed by the setup script? (stunnel4, nginx, n
         stunnel4 nginx libnginx-mod-stream speedtest \
         2>/dev/null || true
     apt autoremove -y 2>/dev/null || true
-    echo "  Done. Note: git, openssh-server, python3, tmux, curl, etc. were NOT removed"
+    echo "  Done. Note: git, openssh-server, python3, curl, etc. were NOT removed"
     echo "  as they are commonly pre-installed or used by other services."
 else
     echo "  Skipping package removal."

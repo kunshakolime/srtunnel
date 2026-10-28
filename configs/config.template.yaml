@@ -1,35 +1,9 @@
 manager:
-  launch_commands:
-  - echo \"Manager started at $(date)\" >> hello.txt
-  - sysctl -w net.core.rmem_max=16777216
-  - sysctl -w net.core.wmem_max=16777216
-  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 20000:30000 -j DNAT --to-destination :36712 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 20000:30000 -j DNAT --to-destination :36712
-  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 6000:19999 -j DNAT --to-destination :5667 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 6000:19999 -j DNAT --to-destination :5667
-  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 3000:5999 -j DNAT --to-destination :5668 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 3000:5999 -j DNAT --to-destination :5668
-  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 1000:2999 -j DNAT --to-destination :5669 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 1000:2999 -j DNAT --to-destination :5669
-  # - iptables -t nat -C PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053 2>/dev/null || iptables -t nat -A PREROUTING -i eth0 -p udp --dport 53 -j REDIRECT --to-port 8053
-  - echo "starting..."
-  - sleep 3
+  # Units enabled by `srtunnel reconcile`. Commands live in configs/units/*.service.
   enable:
   - srapi
   - ws-sr
   - badvpn
-  services:
-    stunnel: stunnel configs/stunnel.conf
-    srapi: ./srapi.py
-    telegram_bot: ./bin/telegram_bot
-    pystunnel: ./bin/pystunnel
-    ws-sr: ./bin/ws-sr -c configs/config.yaml
-    dropbear: ./bin/dropbear -EFR -p 127.0.0.1:23 -W 65536 -b /opt/srtunnel/configs/bannerssh
-    badvpn: ./bin/badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 1000 --max-connections-for-client 1000 --client-socket-sndbuf 0 --udp-mtu 9000
-    zivpn: ./bin/udp-zivpn server -c configs/zivpn.json
-    udp-custom: ./bin/udp-custom -c configs/udp-custom.json
-    hysteria1: ./bin/hysteria1 server --config configs/hysteria1.json
-    hysteria2: ./bin/hysteria2 server --config configs/hysteria2.yaml
-    slowdns: ./bin/dnstt-server -udp :8053 -privkey-file slowdns.key sd.example.com 127.0.0.1:22
-    # udp-rules: iptables -t nat -D PREROUTING -i eth0 -p udp --dport 1:65535 -j DNAT --to-destination :36712
-    xray: ./bin/xray run -config /opt/srtunnel/configs/xray.json
-    tracker: ./bin/traffic_meter_user
 telegram_bot:
   db_file: "users.db"
   config_file: "./configs/zivpn.json"

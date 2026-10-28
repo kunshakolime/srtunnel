@@ -13,21 +13,16 @@ function stopLogStream() {
 
 async function _tickLogStream() {
   if (document.hidden) return;
-  if (_svcMode === 'systemd') {
-    for (const key of _expandedLogs) {
-      if (key.startsWith('sys-')) _fetchSystemdLog(key.slice(4));
+  _refreshLogs();
+}
+
+function _refreshLogs() {
+  for (const key of _expandedLogs) {
+    if (key.startsWith('sys-')) {
+      if (_svcMode === 'systemd') _fetchSystemdLog(key.slice(4));
+    } else if (_svcMode !== 'systemd') {
+      _fetchSvcLog(key);
     }
-    return;
-  }
-  const res = await apiFetch(`/api/services?lines=${_svcLogLines}`).catch(() => null);
-  if (!res?.ok) return;
-  const d = await res.json();
-  for (const s of (d.services || [])) {
-    if (!_expandedLogs.has(s.name)) continue;
-    const el = document.getElementById('log-' + s.name);
-    if (!el) continue;
-    const pre = el.querySelector('pre');
-    if (pre) pre.textContent = (s.log || []).join('\n') || '(no output)';
   }
 }
 
@@ -42,7 +37,7 @@ async function loadServices() {
   const el = document.getElementById('servicesList');
   el.innerHTML = '<p class="empty-state"><span class="spinner"></span></p>';
 
-  const res = await apiFetch(`/api/services?lines=${_svcLogLines}`);
+  const res = await apiFetch('/api/services');
   if (!res.ok) { el.innerHTML = '<p class="empty-state">Could not load services</p>'; return; }
   const d = await res.json();
 
@@ -57,14 +52,13 @@ async function loadServices() {
       <span class="lbl">Lines:</span>
       ${[10,20,50,100].map(n => `
         <button class="btn-sm svc-lines-btn${_svcLogLines===n?' active':''}"
-          onclick="_svcLogLines=${n};loadServices()">${n}</button>
+          onclick="_svcLogLines=${n};_refreshLogs()">${n}</button>
       `).join('')}
     </div>`;
 
   startLogStream();
   el.innerHTML = logSel + services.map(s => {
     const logOpen = _expandedLogs.has(s.name);
-    const logLines = (s.log || []).join('\n') || '(no output)';
 
     return `
       <div class="svc-card">
@@ -89,11 +83,20 @@ async function loadServices() {
           </div>
         </div>
           <div class="svc-log-wrap" id="log-${s.name}" style="display:${logOpen ? 'block' : 'none'}">
-            <pre>${escHtml(logLines)}</pre>
+            <pre></pre>
           </div>
       </div>`;
   }).join('');
   filterServices();
+  _refreshLogs();
+}
+
+async function _fetchSvcLog(name) {
+  const el = document.getElementById('log-' + name);
+  if (!el) return;
+  const pre = el.querySelector('pre');
+  const res = await apiFetch(`/api/services/${name}/logs?lines=${_svcLogLines}`);
+  if (res.ok) { const d = await res.json(); pre.textContent = (d.log || []).join('\n') || '(no output)'; }
 }
 
 function toggleLog(name) {
@@ -103,9 +106,7 @@ function toggleLog(name) {
   const btn = document.getElementById('logbtn-' + name);
   if (el)  el.style.display = _expandedLogs.has(name) ? 'block' : 'none';
   if (btn) btn.textContent  = _expandedLogs.has(name) ? '▲ Hide Log' : '▼ Log';
-  if (_expandedLogs.has(name) && name.startsWith('sys-') && _svcMode === 'systemd') {
-    _fetchSystemdLog(name.slice(4));
-  }
+  if (_expandedLogs.has(name)) _refreshLogs();
 }
 
 function filterServices() {

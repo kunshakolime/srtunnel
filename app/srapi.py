@@ -22,7 +22,6 @@ from starlette.staticfiles import StaticFiles
 import httpx, yaml, logging, traceback, time
 
 from helpers import core, dns, monitor
-from helpers import services as svc_helper
 from helpers.auth import get_current_user
 from helpers.deps import cfg
 

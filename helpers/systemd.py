@@ -125,6 +125,22 @@ def restart(name: str) -> bool:
     return r.returncode == 0
 
 
+def main_pid(name: str) -> int:
+    """Main PID of a unit, or 0 if it is not running."""
+    r = _run(["systemctl", "show", "-p", "MainPID", "--value", f"{name}.service"])
+    try:
+        return int(r.stdout.strip() or 0)
+    except ValueError:
+        return 0
+
+
+def reload(name: str) -> bool:
+    r = _run(["systemctl", "reload", f"{name}.service"])
+    if r.returncode != 0:
+        logger.error("systemctl reload %s failed: %s", name, r.stderr.strip())
+    return r.returncode == 0
+
+
 def enable(name: str) -> bool:
     r = _run(["systemctl", "enable", f"{name}.service"])
     return r.returncode == 0

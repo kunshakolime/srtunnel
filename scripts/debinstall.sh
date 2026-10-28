@@ -26,7 +26,7 @@ case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 # ── APT Dependencies ──────────────────────────────────────────────────────────
 echo "Installing base dependencies..."
 apt update -qq
-apt install -y -qq git openssh-server stunnel4 python3 python3-venv certbot tmux curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
+apt install -y -qq git openssh-server stunnel4 python3 python3-venv certbot curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
 
 # ── Python deps are installed into a venv (see "Python venv" below) ─────────
 
@@ -74,42 +74,15 @@ echo "Setting up Python venv..."
 ln -sf "$BOT_DIR/bin/srtunnel" /usr/sbin/srtunnel
 
 # ── SSH tweak ─────────────────────────────────────────────────────────────
-sshd_ensure(){ grep -qF "$1" /etc/ssh/sshd_config || echo "$1" >> /etc/ssh/sshd_config; }
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-sshd_ensure "KexAlgorithms +diffie-hellman-group14-sha1"
-sshd_ensure "Banner $BOT_DIR/configs/bannerssh"
-sshd_ensure "UsePAM yes"
-# ws-sr/stunnel dial the backend from 127.0.0.1, so every tunnel user shares
-# one source address. OpenSSH 9.8+ PerSourcePenalties would let a single bad
-# client reject everyone else with the banner "Not allowed at this time" —
-# exempt loopback and lift the (global) pre-auth connection cap.
-sshd_ensure "PerSourcePenaltyExemptList 127.0.0.1/32,::1/128"
-sshd_ensure "MaxStartups 100:30:200"
-echo "/sbin/nologin" >> /etc/shells
-systemctl reload sshd || true
+grep -qxF "/sbin/nologin" /etc/shells || echo "/sbin/nologin" >> /etc/shells
 
-# ── Render Config (hardwired) ───────────────────────────────────────────────
-cp configs/config.template.yaml configs/config.yaml
-cp configs/xray.template.json configs/xray.json
-echo "Hardwired config copied to configs/config.yaml / configs/xray.json — edit manually if needed."
+# ── Render Config (hardwired; never clobber an existing deployment) ────────
+[ -f configs/config.yaml ] || cp configs/config.template.yaml configs/config.yaml
+[ -f configs/xray.json ]   || cp configs/xray.template.json configs/xray.json
+echo "Config at configs/config.yaml / configs/xray.json — edit manually if needed."
 
-# ── nginx stream front for ws-sr + http front (tunnel + cockpit) ─────────
-mkdir -p /etc/nginx/stream-available /etc/nginx/stream-enabled
-sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/ws.nginx > /etc/nginx/stream-available/ws
-ln -sf /etc/nginx/stream-available/ws /etc/nginx/stream-enabled/ws
-sed "s|\${BOT_DIR}|$BOT_DIR|g" configs/srtunnel.nginx > /etc/nginx/sites-available/srtunnel
-ln -sf /etc/nginx/sites-available/srtunnel /etc/nginx/sites-enabled/srtunnel
-if ! grep -q "stream-enabled" /etc/nginx/nginx.conf; then
-    sed -i '/^http {/i stream {\n    include /etc/nginx/stream-enabled/*;\n}\n' /etc/nginx/nginx.conf
-fi
-rm -f /etc/nginx/sites-enabled/default   # binds :80, conflicts with stream
-nginx -t && systemctl reload nginx 2>/dev/null || true
-
-# ── cockpit behind the http front (UrlRoot + ProtocolHeader) ─────────────
-if [ -d /etc/cockpit ]; then
-    cp -f "$BOT_DIR/configs/cockpit.conf" /etc/cockpit/cockpit.conf
-    systemctl restart cockpit 2>/dev/null || true
-fi
+# ── nginx: the default site binds :80 and conflicts with the stream front ────
+rm -f /etc/nginx/sites-enabled/default
 
 # ── silence the default Debian warranty banner (/etc/motd) ───────────────
 : > /etc/motd
@@ -117,35 +90,12 @@ fi
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
 ./bin/dnstt-server -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
 
-ln -sf /opt/srtunnel/configs/stunnel.conf /etc/stunnel/stunnel.conf 2>/dev/null || true
-
-# ── Install tunnel unit files ──────────────────────────────────────────────
-echo "Installing tunnel systemd units..."
-for unit in configs/units/*.service; do
-    [ -e "$unit" ] || continue
-    sed "s|/opt/srtunnel|$BOT_DIR|g" "$unit" > "/etc/systemd/system/$(basename "$unit")"
-done
-
 # ── Dashboard admin group ─────────────────────────────────────────────────────
 groupadd -f srtadmin 2>/dev/null || true
 usermod -aG srtadmin root 2>/dev/null || true
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-systemctl daemon-reload
-# enable services listed in config.yaml manager.enable
-if command -v python3 &>/dev/null; then
-    ENABLED=$(python3 -c "
-import yaml, sys
-with open('configs/config.yaml') as f:
-    cfg = yaml.safe_load(f) or {}
-for s in (cfg.get('manager') or {}).get('enable') or []:
-    print(s)
-" 2>/dev/null)
-else
-    ENABLED="srapi ws-sr badvpn"
-fi
-for svc in $ENABLED; do
-    systemctl enable --now "$svc" 2>/dev/null || true
-done
+# ── Render units, nginx, sshd drop-in, sysctl, stunnel, cockpit ───────────────
+echo "Reconciling system configuration..."
+"$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" reconcile
 
-echo "tunnel up and running (nginx stream front for ws-sr installed; dashboard vhost still needs ./scripts/setup-nginx.sh)"
+echo "tunnel installed — 'srtunnel status' to inspect, 'srtunnel reconcile --dry-run' to check drift"
