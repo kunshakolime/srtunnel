@@ -78,7 +78,6 @@ install_bins() {
 }
 
 install_bins
-chmod +x ./* 2>/dev/null || true
 
 # The arm64 bundle is a subset of amd64; warn instead of failing at service start.
 for b in badvpn-udpgw dropbear dnstt-server hysteria2 udp-custom udp-zivpn; do
