@@ -57,8 +57,8 @@ websocket:
   errors:
     ignore_early_reset: true
 stunnel:
-  certfile: server.crt
-  keyfile: server.key
+  certfile: fullchain.pem
+  keyfile: privkey.pem
   log_level: INFO
   listeners:
     - name: https-main

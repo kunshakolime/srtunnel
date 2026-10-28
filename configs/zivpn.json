@@ -1,7 +1,7 @@
 {
   "listen": ":5667",
-  "cert": "./server.crt",
-  "key": "./server.key",
+  "cert": "./fullchain.pem",
+  "key": "./privkey.pem",
   "obfs": "zivpn",
   "auth": {
     "mode": "passwords",

@@ -361,8 +361,13 @@ def run(dry_run: bool = False, force: bool = False,
                 shutil.copy2(nginx_conf_backup, "/etc/nginx/nginx.conf")
             result["error"] = "nginx -t failed; changes rolled back"
             return result
-        ok, out = _run(["systemctl", "reload", "nginx"])
-        result["validated"]["reload:nginx"] = "ok" if ok else out
+        if _active("nginx"):
+            ok, out = _run(["systemctl", "reload", "nginx"])
+            result["validated"]["reload:nginx"] = "ok" if ok else out
+        else:
+            # fresh install: nothing is running yet, so start instead of reload
+            ok, out = _run(["systemctl", "start", "nginx"], timeout=30)
+            result["validated"]["start:nginx"] = "ok" if ok else out
 
     # ── sshd ─────────────────────────────────────────────────────────────────
     if "sshd" in written_names:

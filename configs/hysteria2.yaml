@@ -3,8 +3,8 @@ auth:
   type: password
   password: "passpass123"
 tls:
-  cert: /opt/srtunnel/server.crt
-  key: /opt/srtunnel/server.key
+  cert: /opt/srtunnel/fullchain.pem
+  key: /opt/srtunnel/privkey.pem
   sniGuard: disable
 masquerade:
   type: proxy

@@ -42,8 +42,8 @@
           ],
           "certificates": [
             {
-              "certificateFile": "/opt/srtunnel/server.crt",
-              "keyFile": "/opt/srtunnel/server.key"
+              "certificateFile": "/opt/srtunnel/fullchain.pem",
+              "keyFile": "/opt/srtunnel/privkey.pem"
             }
           ],
           "minVersion": "1.2",

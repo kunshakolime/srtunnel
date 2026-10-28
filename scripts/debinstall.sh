@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -e
 
+# usage: debinstall.sh [-d DOMAIN]
+#   -d DOMAIN   request a Let's Encrypt certificate for DOMAIN (certbot
+#               standalone, :80 released by stopping nginx). Without -d a
+#               self-signed certificate is generated so TLS can start.
+DOMAIN=""
+usage() { echo "usage: $0 [-d DOMAIN]" >&2; }
+while getopts ":d:h" opt; do
+    case "$opt" in
+        d) DOMAIN="$OPTARG" ;;
+        h) usage; exit 0 ;;
+        *) usage; exit 1 ;;
+    esac
+done
+
 BOT_DIR="/opt/srtunnel"
 REPO="https://raw.githubusercontent.com/kunshakolime/srtunnel/main/"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -102,6 +116,42 @@ grep -qxF "/sbin/nologin" /etc/shells || echo "/sbin/nologin" >> /etc/shells
 [ -f configs/config.yaml ] || cp configs/config.template.yaml configs/config.yaml
 [ -f configs/xray.json ]   || cp configs/xray.template.json configs/xray.json
 echo "Config at configs/config.yaml / configs/xray.json — edit manually if needed."
+
+# ── TLS certificate ───────────────────────────────────────────────────────────
+# Every TLS consumer (stunnel, nginx :443/:9443/:8446, hysteria2, zivpn) reads
+# the same two paths, so they are stable regardless of how the cert was obtained.
+CERT="$BOT_DIR/fullchain.pem"
+KEY="$BOT_DIR/privkey.pem"
+
+if [[ ! -f "$CERT" || ! -f "$KEY" ]]; then
+    CN="${DOMAIN:-$(hostname -f 2>/dev/null || hostname)}"
+    echo "No certificate found — generating a self-signed one for $CN."
+    rm -f "$CERT" "$KEY"
+    openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+        -days 3650 -subj "/CN=$CN" -addext "subjectAltName=DNS:$CN" \
+        -keyout "$KEY" -out "$CERT" 2>/dev/null
+    chmod 644 "$CERT"
+    chmod 600 "$KEY"
+fi
+
+if [[ -n "$DOMAIN" ]]; then
+    echo "Requesting a Let's Encrypt certificate for $DOMAIN..."
+    # certbot standalone needs :80, and nginx owns it here — both the initial
+    # request and every renewal (hooks are stored in the renewal config).
+    systemctl stop nginx 2>/dev/null || true
+    if certbot certonly --standalone --non-interactive --agree-tos \
+            --register-unsafely-without-email --cert-name "$DOMAIN" -d "$DOMAIN" \
+            --pre-hook  'systemctl stop nginx 2>/dev/null || true' \
+            --post-hook 'systemctl start nginx 2>/dev/null || true' \
+            --deploy-hook 'systemctl try-restart stunnel 2>/dev/null || true'; then
+        ln -sfn "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT"
+        ln -sfn "/etc/letsencrypt/live/$DOMAIN/privkey.pem"  "$KEY"
+        echo "Using the Let's Encrypt certificate for $DOMAIN."
+    else
+        echo "WARNING: certbot failed for $DOMAIN — keeping the self-signed certificate." >&2
+    fi
+    systemctl start nginx 2>/dev/null || true
+fi
 
 # ── nginx: the default site binds :80 and conflicts with the stream front ────
 rm -f /etc/nginx/sites-enabled/default

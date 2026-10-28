@@ -4,8 +4,8 @@ __pycache__/
 *.pyc
 
 # Secrets & certs
-server.crt
-server.key
+fullchain.pem
+privkey.pem
 slowdns.key
 slowdns.pub
 config.yaml

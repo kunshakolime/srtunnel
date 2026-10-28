@@ -26,8 +26,8 @@ server {
 
 server {
     listen 8446 ssl;
-    ssl_certificate     ${BOT_DIR}/server.crt;
-    ssl_certificate_key ${BOT_DIR}/server.key;
+    ssl_certificate     ${BOT_DIR}/fullchain.pem;
+    ssl_certificate_key ${BOT_DIR}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     proxy_pass 127.0.0.1:18081;

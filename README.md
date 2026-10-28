@@ -8,6 +8,11 @@ As `root`:
 ```bash
 curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/scripts/debinstall.sh | bash
 ```
+Add `-d <domain>` to request a Let's Encrypt certificate (certbot standalone):
+```bash
+curl -sSL https://raw.githubusercontent.com/kunshakolime/srtunnel/main/scripts/debinstall.sh | bash -s -- -d tunnel.example.com
+```
+Without `-d`, a self-signed certificate is generated so TLS services can start.
 ## CLI
 
 ```bash
@@ -48,6 +53,25 @@ one. The eBPF meter (`traffic_meter_user`, `traffic_meter.bpf.o`) and
 Publishing a new bundle: build `srtunnel-bins-{arm64,amd64}.tar.gz` plus
 `SHA256SUMS`, create a release with that tag, then bump `TAG` and the hashes in
 `binaries.lock`.
+
+## Certificates
+
+Every TLS consumer reads the same two files at the repo root — no per-service
+paths:
+
+| file | mode |
+|---|---|
+| `fullchain.pem` | certificate + chain |
+| `privkey.pem` | private key |
+
+- `debinstall.sh -d DOMAIN` runs `certbot certonly --standalone` and points
+  those paths at `/etc/letsencrypt/live/DOMAIN/`. nginx is stopped for the
+  challenge and started again afterwards; the same pre/post hooks are stored in
+  the certbot renewal config, so `certbot.timer` renews without breaking.
+- Without `-d`, a self-signed pair (10 years) is generated if the files are
+  missing.
+- Renewal also restarts stunnel through a deploy hook, since it only reads the
+  certificate at startup.
 
 ## Uninstall
 ```bash
