@@ -59,6 +59,8 @@ rm -rf /usr/local/libexec/srtunnel
 rm -f /etc/stunnel/stunnel.conf
 rm -f /etc/sysctl.d/99-srtunnel.conf
 rm -rf /var/lib/srtunnel
+rm -rf /etc/srtunnel
+nft delete table inet srtunnel_nat 2>/dev/null || true
 
 # ── Revert SSH Config ─────────────────────────────────────────────────────────
 echo ""

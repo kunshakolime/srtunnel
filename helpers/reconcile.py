@@ -52,16 +52,87 @@ PerSourcePenaltyExemptList 127.0.0.1/32,::1/128
 MaxStartups 100:30:200
 """
 
-SYSCTL_DROPIN = """# Managed by srtunnel reconcile
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-"""
+def _load_cfg() -> dict:
+    for p in (BASE_DIR / "configs" / "config.yaml", BASE_DIR / "config.yaml",
+              BASE_DIR / "configs" / "config.template.yaml"):
+        if p.is_file():
+            try:
+                import yaml
+                return yaml.safe_load(p.read_text()) or {}
+            except ImportError:
+                venv_py = BASE_DIR / "venv" / "bin" / "python"
+                if venv_py.is_file():
+                    try:
+                        cmd = [str(venv_py), "-c",
+                               f"import yaml, json; print(json.dumps(yaml.safe_load(open('{p}').read()) or {{}}))"]
+                        out = subprocess.check_output(cmd, text=True, timeout=5)
+                        return json.loads(out)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    return {}
+
+
+def _render_sysctl(cfg: dict) -> str:
+    s = cfg.get("sysctl") or {}
+    rmem = s.get("rmem_max", 16777216)
+    wmem = s.get("wmem_max", 16777216)
+    return (
+        f"# Managed by srtunnel reconcile\n"
+        f"net.core.rmem_max = {rmem}\n"
+        f"net.core.wmem_max = {wmem}\n"
+    )
+
+
+def _detect_interface(cfg: dict) -> str:
+    r = cfg.get("routing") or {}
+    iface = r.get("interface", "auto")
+    if iface and iface not in ("auto", "all"):
+        return iface
+    if iface == "auto":
+        try:
+            p = subprocess.run(["ip", "-4", "route", "show", "default"],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5)
+            for line in p.stdout.splitlines():
+                parts = line.split()
+                if "dev" in parts:
+                    idx = parts.index("dev")
+                    if idx + 1 < len(parts):
+                        return parts[idx + 1]
+        except Exception:
+            pass
+    return (cfg.get("telegram_bot") or {}).get("interface") or ""
+
+
+def _render_routing(cfg: dict) -> str:
+    r = cfg.get("routing") or {}
+    rules = r.get("rules") or []
+    iface = _detect_interface(cfg)
+    iif_clause = f'iifname "{iface}" ' if iface and r.get("interface") != "all" else ""
+
+    lines = [
+        "# Managed by srtunnel reconcile",
+        "table inet srtunnel_nat",
+        "delete table inet srtunnel_nat",
+        "table inet srtunnel_nat {",
+        "    chain prerouting {",
+        "        type nat hook prerouting priority dstnat; policy accept;",
+    ]
+    for rule in rules:
+        proto = rule.get("proto", "udp")
+        dport = str(rule.get("dport", "")).replace(":", "-")
+        redirect = str(rule.get("redirect", ""))
+        lines.append(f"        {iif_clause}{proto} dport {dport} redirect to :{redirect}")
+    lines.append("    }")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 @dataclass
 class Target:
     name: str
-    kind: str                      # unit | nginx | stunnel | cockpit | sshd | sysctl
+    kind: str                      # unit | nginx | stunnel | cockpit | sshd | sysctl | routing
     dst: Path
     source: Optional[Path] = None
     text: Optional[str] = None
@@ -111,9 +182,16 @@ def targets() -> list[Target]:
     ts.append(Target("sshd", "sshd",
                      Path("/etc/ssh/sshd_config.d/srtunnel.conf"),
                      text=SSHD_DROPIN.format(bot=BOT_DIR), mode=0o600))
+    cfg = _load_cfg()
     ts.append(Target("sysctl", "sysctl",
                      Path("/etc/sysctl.d/99-srtunnel.conf"),
-                     text=SYSCTL_DROPIN))
+                     text=_render_sysctl(cfg)))
+
+    routing_cfg = cfg.get("routing") or {}
+    if routing_cfg.get("enabled", True) and routing_cfg.get("rules"):
+        ts.append(Target("routing-nft", "routing",
+                         Path("/etc/srtunnel/routing.nft"),
+                         text=_render_routing(cfg)))
     return ts
 
 
@@ -284,11 +362,7 @@ def _restore(written: list[tuple[Target, Action]], state: dict) -> None:
 
 def _enable_units() -> dict[str, str]:
     """Enable the units listed in configs/config.yaml → manager.enable."""
-    try:
-        import yaml
-        raw = yaml.safe_load((BASE_DIR / "configs" / "config.yaml").read_text()) or {}
-    except Exception:
-        return {}
+    raw = _load_cfg()
     names = (raw.get("manager") or {}).get("enable") or []
     result = {}
     for name in names:
@@ -384,6 +458,17 @@ def run(dry_run: bool = False, force: bool = False,
     if "sysctl" in written_names:
         ok, out = _run(["sysctl", "-q", "-p", "/etc/sysctl.d/99-srtunnel.conf"])
         result["validated"]["sysctl"] = "ok" if ok else out
+
+    # ── routing (nftables) ───────────────────────────────────────────────────
+    if "routing-nft" in written_names:
+        ok, out = _run(["nft", "--check", "-f", "/etc/srtunnel/routing.nft"])
+        result["validated"]["nft"] = "ok" if ok else out
+        if not ok:
+            _restore(written, state)
+            result["error"] = f"nft --check failed: {out}; changes rolled back"
+            return result
+        ok, out = _run(["nft", "-f", "/etc/srtunnel/routing.nft"])
+        result["validated"]["apply:routing-nft"] = "ok" if ok else out
 
     # ── units ────────────────────────────────────────────────────────────────
     unit_changes = [(t, a) for t, a in written if t.kind == "unit"]

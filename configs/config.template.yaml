@@ -4,6 +4,34 @@ manager:
   - srapi
   - ws-sr
   - badvpn
+  - srtunnel-routing
+
+sysctl:
+  # TCP and socket receive/transmit buffer limits (in bytes)
+  rmem_max: 16777216
+  wmem_max: 16777216
+
+routing:
+  # Isolated nftables port forwarding (Option A)
+  enabled: true
+  # Network interface to listen on: "auto" (default route), or specific like "eth0", or "all"
+  interface: "auto"
+  rules:
+    - proto: udp
+      dport: 53
+      redirect: 8053
+    - proto: udp
+      dport: "1000-2999"
+      redirect: 5669
+    - proto: udp
+      dport: "3000-5999"
+      redirect: 5668
+    - proto: udp
+      dport: "6000-19999"
+      redirect: 5667
+    - proto: udp
+      dport: "20000-30000"
+      redirect: 36712
 telegram_bot:
   db_file: "users.db"
   config_file: "./configs/zivpn.json"

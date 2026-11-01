@@ -1,0 +1,12 @@
+[Unit]
+Description=srtunnel port routing (nftables)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/srtunnel/routing.nft
+ExecStop=-/usr/sbin/nft delete table inet srtunnel_nat
+
+[Install]
+WantedBy=multi-user.target
