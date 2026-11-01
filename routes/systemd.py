@@ -54,6 +54,9 @@ def enable_unit(name: str, user: CurrentUser):
     ok = systemd.enable(name)
     if not ok:
         raise HTTPException(status_code=400, detail=f"Failed to enable {name}")
+    from helpers import units
+    units.sync_manager_enable(name, True)
+    logger.info("systemd enable: %s by %s", name, user)
     return {"name": name, "enabled": True}
 
 
@@ -62,4 +65,7 @@ def disable_unit(name: str, user: CurrentUser):
     ok = systemd.disable(name)
     if not ok:
         raise HTTPException(status_code=400, detail=f"Failed to disable {name}")
+    from helpers import units
+    units.sync_manager_enable(name, False)
+    logger.info("systemd disable: %s by %s", name, user)
     return {"name": name, "enabled": False}

@@ -76,8 +76,8 @@ async function loadServices() {
             }
             <select class="btn-sm" style="padding:5px 8px;font-size:11px;font-family:var(--font-mono)"
               onchange="setSvcStatus('${s.name}',this.value)">
-              <option value="enable"  ${s.status==='enable' ?'selected':''}>once</option>
-              <option value="disable" ${s.status==='disable'?'selected':''}>off</option>
+              <option value="enable"  ${s.status==='enable' ?'selected':''}>enabled</option>
+              <option value="disable" ${s.status==='disable'?'selected':''}>disabled</option>
             </select>
             <button class="btn-sm" style="font-size:11px" onclick="toggleLog('${s.name}')" id="logbtn-${s.name}">${logOpen ? '▲' : '▼'}</button>
           </div>
@@ -147,25 +147,37 @@ async function loadSystemdUnits() {
   el.innerHTML = units.map(u => {
     const running = u.active === 'active';
     const statusColor = running ? 'var(--green)' : u.active === 'failed' ? 'var(--red)' : 'var(--text3)';
+    const isEnabled = !!u.enabled;
+    const fileState = u.unit_file_state || (isEnabled ? 'enabled' : 'disabled');
+    const enableBadgeColor = isEnabled ? 'var(--accent)' : 'var(--text3)';
+    const canToggleEnable = u.unit_file_state !== 'static' && u.unit_file_state !== 'masked';
+
     return `
       <div class="svc-card">
         <div class="svc-card-header">
           <div class="svc-card-left">
             <span class="svc-dot" style="color:${running ? 'var(--green)' : 'var(--red)'}">${running ? '●' : '○'}</span>
-            <span class="svc-name">${u.name}</span>
-            <span class="svc-badge" style="background:${statusColor}1a;color:${statusColor}">${u.active}/${u.sub}</span>
-            <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${u.description}</span>
+            <span class="svc-name">${escHtml(u.name)}</span>
+            <span class="svc-badge" style="background:${statusColor}1a;color:${statusColor}">${escHtml(u.active)}/${escHtml(u.sub)}</span>
+            ${fileState ? `<span class="svc-badge" style="background:${enableBadgeColor}1a;color:${enableBadgeColor}">${escHtml(fileState)}</span>` : ''}
+            <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${escHtml(u.description || '')}</span>
           </div>
           <div class="svc-card-right">
             ${running
-              ? `<button class="btn-sm" onclick="systemdAction('${u.name}','restart')">↺ Restart</button>
-                 <button class="btn-danger btn-icon" onclick="systemdAction('${u.name}','stop')">■ Stop</button>`
-              : `<button class="btn-green btn-sm" onclick="systemdAction('${u.name}','start')">▶ Start</button>`
+              ? `<button class="btn-sm" onclick="systemdAction('${escHtml(u.name)}','restart')">↺ Restart</button>
+                 <button class="btn-danger btn-icon" onclick="systemdAction('${escHtml(u.name)}','stop')">■ Stop</button>`
+              : `<button class="btn-green btn-sm" onclick="systemdAction('${escHtml(u.name)}','start')">▶ Start</button>`
             }
-            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('sys-${u.name}')" id="logbtn-sys-${u.name}">▼</button>
+            ${canToggleEnable
+              ? (isEnabled
+                  ? `<button class="btn-sm" style="color:var(--text2)" onclick="systemdAction('${escHtml(u.name)}','disable')" title="Disable unit on boot">Disable</button>`
+                  : `<button class="btn-sm" style="color:var(--accent);border-color:rgba(124,106,247,.35)" onclick="systemdAction('${escHtml(u.name)}','enable')" title="Enable unit on boot">Enable</button>`)
+              : ''
+            }
+            <button class="btn-sm" style="font-size:11px" onclick="toggleLog('sys-${escHtml(u.name)}')" id="logbtn-sys-${escHtml(u.name)}">▼</button>
           </div>
         </div>
-        <div class="svc-log-wrap" id="log-sys-${u.name}" style="display:none">
+        <div class="svc-log-wrap" id="log-sys-${escHtml(u.name)}" style="display:none">
           <pre></pre>
         </div>
       </div>`;

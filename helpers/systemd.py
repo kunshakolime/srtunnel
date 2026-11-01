@@ -59,13 +59,16 @@ def list_units(pattern: str = "*.service") -> List[dict]:
     result = []
     for name in all_names:
         ls = live.get(name, {})
+        unit_state = installed.get(name, "")
         result.append({
-            "name":        name,
-            "full":        f"{name}.service",
-            "load":        ls.get("load", "not-loaded"),
-            "active":      ls.get("active", "inactive"),
-            "sub":         ls.get("sub", ""),
-            "description": ls.get("description", ""),
+            "name":            name,
+            "full":            f"{name}.service",
+            "load":            ls.get("load", "not-loaded"),
+            "active":          ls.get("active", "inactive"),
+            "sub":             ls.get("sub", ""),
+            "description":     ls.get("description", ""),
+            "unit_file_state": unit_state,
+            "enabled":         unit_state in ("enabled", "enabled-runtime"),
         })
     return result
 
@@ -83,12 +86,14 @@ def _parse_list_units() -> List[dict]:
             continue
         name = parts[0].removesuffix(".service")
         units.append({
-            "name":        name,
-            "full":        parts[0],
-            "load":        parts[1],
-            "active":      parts[2],
-            "sub":         parts[3],
-            "description": parts[4] if len(parts) > 4 else "",
+            "name":            name,
+            "full":            parts[0],
+            "load":            parts[1],
+            "active":          parts[2],
+            "sub":             parts[3],
+            "description":     parts[4] if len(parts) > 4 else "",
+            "unit_file_state": "",
+            "enabled":         False,
         })
     return units
 

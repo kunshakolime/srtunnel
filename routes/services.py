@@ -109,8 +109,10 @@ def set_service_status(name: str, data: ServiceStatusRequest, user: CurrentUser)
     _require(name)
     if data.status == "enable":
         ok = systemd.enable(name)
+        units.sync_manager_enable(name, True)
     elif data.status == "disable":
         ok = systemd.disable(name)
+        units.sync_manager_enable(name, False)
     else:
         raise HTTPException(status_code=400, detail="status must be enable or disable")
     if not ok:

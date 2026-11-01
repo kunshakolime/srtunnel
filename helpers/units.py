@@ -64,3 +64,26 @@ def states(names: list[str] | None = None) -> dict[str, dict]:
 
 def state(name: str) -> dict:
     return states([name])[name]
+
+
+def sync_manager_enable(name: str, enable: bool) -> None:
+    """Keep configs/config.yaml manager.enable in sync when a managed unit is enabled/disabled."""
+    if name not in managed():
+        return
+    import yaml
+    for p in (BASE_DIR / "configs" / "config.yaml", BASE_DIR / "config.yaml"):
+        if p.is_file():
+            try:
+                raw = yaml.safe_load(p.read_text()) or {}
+                mgr = raw.get("manager") or {}
+                en = list(mgr.get("enable") or [])
+                if enable and name not in en:
+                    en.append(name)
+                elif not enable and name in en:
+                    en.remove(name)
+                mgr["enable"] = en
+                raw["manager"] = mgr
+                p.write_text(yaml.dump(raw, sort_keys=False))
+            except Exception:
+                pass
+            break
