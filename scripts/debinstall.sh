@@ -65,8 +65,8 @@ install_bins() {
     local base_url="https://github.com/kunshakolime/srtunnel/releases/latest/download"
     local bins=()
     case "$ARCH" in
-        amd64) bins=(badvpn-udpgw dropbear dropbearkey dropbearconvert dnstt-server hysteria2 udp-custom udp-zivpn) ;;
-        arm64) bins=(badvpn-udpgw udp-zivpn) ;;
+        amd64) bins=(badvpn-udpgw dropbear dropbearkey dropbearconvert dnstt-server hysteria2 udp-custom udp-zivpn ipmask_tool traffic_meter_user) ;;
+        arm64) bins=(badvpn-udpgw udp-zivpn ipmask_tool traffic_meter_user) ;;
     esac
 
     mkdir -p "$BIN_DIR"
@@ -76,11 +76,8 @@ install_bins() {
         [ -f "$BIN_DIR/$b" ] && chmod 0755 "$BIN_DIR/$b"
     done
 
-    # small per-arch artifacts built from this repo, kept version-coupled
-    for f in traffic_meter_user ipmask_tool; do
-        install -m0755 "bin/$ARCH/$f" "$BIN_DIR/$f"
-    done
-    install -m0644 "bin/$ARCH/traffic_meter.bpf.o" "$BIN_DIR/traffic_meter.bpf.o"
+    curl -fsSL "$base_url/traffic_meter.bpf.o" -o "$BIN_DIR/traffic_meter.bpf.o" || echo "WARNING: failed to download traffic_meter.bpf.o" >&2
+    [ -f "$BIN_DIR/traffic_meter.bpf.o" ] && chmod 0644 "$BIN_DIR/traffic_meter.bpf.o"
 }
 
 install_bins
