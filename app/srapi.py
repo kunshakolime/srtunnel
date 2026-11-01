@@ -43,6 +43,14 @@ async def lifespan(app: FastAPI):
         core.init(cfg)
         core.init_db()
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
+
+        # Post-startup memory cleanup: return dirty import pages to OS
+        import gc
+        gc.collect()
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
     except Exception as e:
         logger.critical("startup failed: %s — %s", type(e).__name__, e)
         logger.critical(traceback.format_exc())

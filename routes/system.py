@@ -3,9 +3,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Union, List
 from pathlib import Path
-import logging, traceback, yaml
+import logging, traceback
 
-from helpers import monitor, speedtest as st
+from helpers import monitor
 from helpers.deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
@@ -88,6 +88,7 @@ def get_ssh_users(user: CurrentUser):
 
 @router.get("/speedtest")
 def speedtest(user: CurrentUser):
+    from helpers import speedtest as st
     logger.info("Speedtest started by %s", user)
     try:
         proc, progress_file = st.start()

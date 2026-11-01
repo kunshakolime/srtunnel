@@ -1,4 +1,14 @@
+import base64
+import hashlib
+import hmac
 import json
+import secrets
+from pathlib import Path
+from typing import Optional
+from fastapi import HTTPException, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.requests import HTTPConnection
+
 try:
     import pam as _pam
     _PAM_OK = True
@@ -9,12 +19,6 @@ except ImportError:
     except ImportError:
         _pam = None
         _PAM_OK = False
-from pathlib import Path
-from jose import jwt, JWTError
-from typing import Optional
-from fastapi import HTTPException, Depends, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import secrets
 
 KEY_FILE = Path(__file__).resolve().parent / ".secret_key"
 if KEY_FILE.exists():
@@ -26,9 +30,16 @@ ALGORITHM  = "HS256"
 
 TOKENS_FILE = Path(__file__).resolve().parent / "tokens.json"
 
-from starlette.requests import HTTPConnection
-
 security = HTTPBearer(auto_error=False)
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+def _b64url_decode(s: str) -> bytes:
+    rem = len(s) % 4
+    if rem:
+        s += "=" * (4 - rem)
+    return base64.urlsafe_b64decode(s.encode("ascii"))
 
 # ── tokens.json helpers ───────────────────────────────────────────────────────
 # Format: [ { "token": "...", "label": "my laptop", "user": "root", "created": "..." } ]
@@ -109,8 +120,22 @@ def user_in_group(username: str, group: str) -> bool:
 
 def create_token(username: str) -> str:
     # No exp claim — tokens never expire; revocation is via tokens.json
-    raw = jwt.encode({"sub": username}, SECRET_KEY, algorithm=ALGORITHM)
-    return raw
+    header = _b64url_encode(b'{"typ":"JWT","alg":"HS256"}')
+    payload = _b64url_encode(json.dumps({"sub": username}, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header}.{payload}".encode("ascii")
+    sig = _b64url_encode(hmac.new(SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256).digest())
+    return f"{header}.{payload}.{sig}"
+
+def _verify_and_decode_token(raw_token: str) -> dict:
+    parts = raw_token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Invalid JWT format")
+    header_b64, payload_b64, sig_b64 = parts
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    expected_sig = _b64url_encode(hmac.new(SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256).digest())
+    if not hmac.compare_digest(sig_b64, expected_sig):
+        raise ValueError("Invalid signature")
+    return json.loads(_b64url_decode(payload_b64).decode("utf-8"))
 
 def get_current_user(request: HTTPConnection):
     raw = None
@@ -128,10 +153,9 @@ def get_current_user(request: HTTPConnection):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        payload = jwt.decode(raw, SECRET_KEY, algorithms=[ALGORITHM],
-                             options={"verify_exp": False})
+        payload = _verify_and_decode_token(raw)
         username = payload.get("sub")
-    except JWTError:
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     if not username or _is_revoked(raw):
