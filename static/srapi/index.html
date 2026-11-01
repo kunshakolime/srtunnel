@@ -57,9 +57,8 @@
     <div class="nav">
       <button class="active" onclick="showPage('dashboard',this)">Dashboard</button>
       <button onclick="showPage('users',this)">Users</button>
-      <button onclick="showPage('xray',this)">Xray</button>
+      <button onclick="window.location.href='/3x-ui/'">Xray ↗</button>
       <button onclick="showPage('services',this)">Services</button>
-      <button onclick="showPage('dns',this)">DNS</button>
       <button onclick="showPage('backup',this)">Backup</button>
       <button onclick="showPage('scope',this)">Scope</button>
       <button onclick="showPage('servers',this)">Servers &amp; Tokens</button>
@@ -161,21 +160,6 @@
       </div>
     </div>
 
-    <!-- XRAY -->
-    <div id="page-xray" class="page">
-      <div class="section-header">
-        <h3>Xray Management</h3>
-        <div class="hdr-actions">
-          <button class="btn-sm" onclick="loadXray()">↺ Refresh</button>
-        </div>
-      </div>
-      <div id="xrayContent">
-        <div class="card" style="text-align:center;padding:40px">
-          <p style="color:var(--text3)">Xray not configured or no inbounds available</p>
-        </div>
-      </div>
-    </div>
-
     <!-- SERVICES -->
     <div id="page-services" class="page">
       <div class="section-header">
@@ -196,22 +180,6 @@
         </div>
       </div>
       <div id="servicesList"></div>
-    </div>
-
-    <!-- DNS -->
-    <div id="page-dns" class="page">
-      <div class="section-header">
-        <h3>DNS Records</h3>
-        <div class="hdr-actions">
-          <button class="btn" onclick="openModal('dnsModal')">+ New Record</button>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Proxy</th><th>Action</th></tr></thead>
-          <tbody id="dnsBody"></tbody>
-        </table>
-      </div>
     </div>
 
     <!-- BACKUP -->
@@ -332,20 +300,12 @@
       <label>Services</label>
       <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px">
         <div class="toggle-row">
-          <span>SSH / Dropbear</span>
+          <span>SSH</span>
           <label class="toggle"><input type="checkbox" id="nu_svc_ssh" checked><span class="toggle-slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>ZiVPN</span>
           <label class="toggle"><input type="checkbox" id="nu_svc_zivpn" checked><span class="toggle-slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span>Xray</span>
-          <label class="toggle"><input type="checkbox" id="nu_svc_xray" onchange="toggleXrayInbounds()"><span class="toggle-slider"></span></label>
-        </div>
-        <div id="xrayInboundsSelect" style="display:none;margin-top:8px;margin-left:24px">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Select inbound(s)</div>
-          <div id="xrayInboundsList" style="display:flex;flex-direction:column;gap:4px"></div>
         </div>
       </div>
     </div>
@@ -374,29 +334,6 @@
     <div class="modal-footer">
       <button class="btn-sm" onclick="closeModal('addServerModal')">Cancel</button>
       <button class="btn" onclick="doAddServer()">Save Server</button>
-    </div>
-  </div>
-</div>
-
-<!-- DNS New Record -->
-<div id="dnsModal" class="modal">
-  <div class="modal-box">
-    <h4>New DNS Record</h4>
-    <div class="form-row"><label>Type</label>
-      <select id="dns_type">
-        <option>A</option><option>AAAA</option><option>CNAME</option>
-        <option>TXT</option><option>MX</option><option>NS</option>
-      </select>
-    </div>
-    <div class="form-row"><label>Name (subdomain)</label><input id="dns_name" placeholder="sub"></div>
-    <div class="form-row"><label>Value</label><input id="dns_value" placeholder="1.2.3.4"></div>
-    <div class="form-check">
-      <input type="checkbox" id="dns_proxied">
-      <label for="dns_proxied">Proxy through Cloudflare CDN</label>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-sm" onclick="closeModal('dnsModal')">Cancel</button>
-      <button class="btn" onclick="doCreateDns()">Create Record</button>
     </div>
   </div>
 </div>
@@ -454,7 +391,7 @@
     <h4>Services: <span id="svc_username_lbl" style="color:var(--accent)"></span></h4>
     <div style="display:flex;flex-direction:column;gap:4px;margin-top:16px">
       <div class="toggle-row">
-        <span>SSH / Dropbear</span>
+        <span>SSH</span>
         <label class="toggle"><input type="checkbox" id="svc_ssh"><span class="toggle-slider"></span></label>
       </div>
       <div class="toggle-row">
@@ -557,7 +494,6 @@
 <script src="js/auth.js"></script>
 <script src="js/nav.js"></script>
 <script src="js/dashboard.js"></script>
-<script src="js/xray.js"></script>
 <script src="js/pages.js"></script>
 <script src="js/files.js"></script>
 

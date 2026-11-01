@@ -71,8 +71,6 @@ async function _dashTick() {
 
 const _loaders = {
   users:   () => loadUsers(),
-  xray:    () => loadXray(),
-  dns:     () => loadDns(),
   scope:   () => loadScope(),
   servers: () => { loadServersPage(); loadTokens(); },
   tokens:  () => {},

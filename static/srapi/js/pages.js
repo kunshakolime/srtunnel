@@ -302,55 +302,6 @@ async function runSpeedtest() {
   _stRunning = false;
 }
 
-// ── DNS ───────────────────────────────────────────────────────────────────────
-
-async function loadDns() {
-  const res = await apiFetch('/api/dns');
-  if (res.status === 503) {
-    document.getElementById('dnsBody').innerHTML = '<tr><td colspan="5" class="empty-state">Cloudflare not configured — add cf_token and cf_zone to config.yaml</td></tr>';
-    return;
-  }
-  if (!res.ok) { document.getElementById('dnsBody').innerHTML = '<tr><td colspan="5" class="empty-state">Error loading DNS records</td></tr>'; return; }
-  const records = await res.json();
-  document.getElementById('dnsBody').innerHTML = records.length
-    ? records.map(r => `
-        <tr>
-          <td style="font-family:var(--font-mono);font-size:12px">${r.name}</td>
-          <td><span class="badge" style="background:var(--bg4);color:var(--text2)">${r.type}</span></td>
-          <td style="font-family:var(--font-mono);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${r.content}</td>
-          <td>${r.proxied ? '🟠 Proxied' : '⚪ DNS only'}</td>
-          <td><button class="btn-danger btn-icon" onclick="deleteDns('${r.id}')">✕ Del</button></td>
-        </tr>
-      `).join('')
-    : '<tr><td colspan="5" class="empty-state">No DNS records</td></tr>';
-}
-
-async function doCreateDns() {
-  const body = {
-    type: document.getElementById('dns_type').value,
-    name: document.getElementById('dns_name').value,
-    value: document.getElementById('dns_value').value,
-    proxied: document.getElementById('dns_proxied').checked
-  };
-  if (!body.name || !body.value) { toast('Name and value required', 'err'); return; }
-  const res = await apiFetch('/api/dns', { method: 'POST', body: JSON.stringify(body) });
-  const d = await res.json();
-  if (!res.ok) { toast(d.detail || 'Error', 'err'); return; }
-  toast('DNS record created');
-  closeModal('dnsModal');
-  document.getElementById('dns_name').value = '';
-  document.getElementById('dns_value').value = '';
-  document.getElementById('dns_proxied').checked = false;
-  loadDns();
-}
-
-async function deleteDns(id) {
-  if (!confirm('Delete this DNS record?')) return;
-  const res = await apiFetch(`/api/dns/${id}`, { method: 'DELETE' });
-  if (res.ok) { toast('DNS record deleted'); loadDns(); }
-  else { const d = await res.json(); toast(d.detail || 'Error', 'err'); }
-}
-
 // ── Backup ────────────────────────────────────────────────────────────────────
 
 async function downloadBackup() {
