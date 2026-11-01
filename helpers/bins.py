@@ -16,9 +16,6 @@ RELEASE_BASE_URL = "https://github.com/kunshakolime/srtunnel/releases/latest/dow
 BINS_BY_ARCH: dict[str, list[str]] = {
     "amd64": [
         "badvpn-udpgw",
-        "dropbear",
-        "dropbearkey",
-        "dropbearconvert",
         "dnstt-server",
         "hysteria2",
         "udp-custom",
@@ -40,7 +37,6 @@ COMMON_FILES = [
 
 AFFECTED_SERVICES = [
     "badvpn",
-    "dropbear",
     "hysteria2",
     "slowdns",
     "udpcustom",

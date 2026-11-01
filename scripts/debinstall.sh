@@ -53,7 +53,7 @@ install_bins() {
     local base_url="https://github.com/kunshakolime/srtunnel/releases/latest/download"
     local bins=()
     case "$ARCH" in
-        amd64) bins=(badvpn-udpgw dropbear dropbearkey dropbearconvert dnstt-server hysteria2 udp-custom udp-zivpn ipmask_tool traffic_meter_user) ;;
+        amd64) bins=(badvpn-udpgw dnstt-server hysteria2 udp-custom udp-zivpn ipmask_tool traffic_meter_user) ;;
         arm64) bins=(badvpn-udpgw udp-zivpn ipmask_tool traffic_meter_user) ;;
     esac
 
@@ -80,7 +80,7 @@ if [[ "$UPDATE_ONLY" == "1" ]]; then
     echo "Updating binaries in $BIN_DIR..."
     install_bins
     echo "Restarting active services..."
-    for s in badvpn dropbear hysteria2 slowdns udpcustom zivpn trafficmeter; do
+    for s in badvpn hysteria2 slowdns udpcustom zivpn trafficmeter; do
         systemctl try-restart "$s.service" 2>/dev/null || true
     done
     echo "Binaries update complete."
@@ -106,7 +106,7 @@ srt() { "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" "$@"; }
 install_bins
 
 # The arm64 bundle is a subset of amd64; warn instead of failing at service start.
-for b in badvpn-udpgw dropbear dnstt-server hysteria2 udp-custom udp-zivpn; do
+for b in badvpn-udpgw dnstt-server hysteria2 udp-custom udp-zivpn; do
     [ -x "$BIN_DIR/$b" ] || echo "WARNING: no $ARCH build for $b — its service(s) will fail" >&2
 done
 
