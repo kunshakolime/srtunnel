@@ -29,7 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-# Release binaries — kept off PATH, see binaries.lock.
+# Release binaries — kept off PATH.
 BIN_DIR = Path(os.environ.get("SRTUNNEL_BIN_DIR", "/usr/local/libexec/srtunnel"))
 
 

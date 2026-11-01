@@ -27,8 +27,7 @@ traffic_totals.json
 tmp/
 hello.txt
 
-# Third-party binaries live in /usr/local/libexec/srtunnel (release assets, see
-# binaries.lock) — never add them to the checkout.
+# Third-party binaries live in /usr/local/libexec/srtunnel — never add them to the checkout.
 
 # Generated / downloaded assets
 geoip.dat

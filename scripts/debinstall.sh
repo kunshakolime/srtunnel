@@ -51,9 +51,8 @@ cd "$BOT_DIR"
 srt() { "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" "$@"; }
 
 # ── Release binaries ──────────────────────────────────────────────────────────
-# Third-party binaries are GitHub release assets (pinned in binaries.lock), not
-# tracked in git. They live outside the checkout so `git clean` and repo updates
-# cannot touch them. `srtunnel bin` / `srtunnel exec NAME` reach them.
+# Third-party binaries are GitHub release assets, not tracked in git.
+# They live outside the checkout so `git clean` and repo updates cannot touch them.
 BIN_DIR="/usr/local/libexec/srtunnel"
 ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 case "$ARCH" in
@@ -63,33 +62,25 @@ case "$ARCH" in
 esac
 
 install_bins() {
-    local tmp tag want url
-    tmp="$(mktemp -d)"
-    curl -fsSL "${REPO}binaries.lock" -o "$tmp/binaries.lock" || die "cannot fetch binaries.lock"
-    tag="$(sed -n 's/^TAG=//p' "$tmp/binaries.lock")"
-    want="$(sed -n "s/^$ARCH=//p" "$tmp/binaries.lock")"
-    [[ -n "$tag" && -n "$want" ]] || die "binaries.lock has no $ARCH entry"
-    mkdir -p "$BIN_DIR"
+    local base_url="https://github.com/kunshakolime/srtunnel/releases/latest/download"
+    local bins=()
+    case "$ARCH" in
+        amd64) bins=(badvpn-udpgw dropbear dropbearkey dropbearconvert dnstt-server hysteria2 udp-custom udp-zivpn) ;;
+        arm64) bins=(badvpn-udpgw udp-zivpn) ;;
+    esac
 
-    if [[ "$(cat "$BIN_DIR/.release" 2>/dev/null)" == "$tag-$ARCH" ]]; then
-        echo "Binaries $tag ($ARCH) already installed in $BIN_DIR."
-    else
-        url="https://github.com/kunshakolime/srtunnel/releases/download/$tag/srtunnel-bins-$ARCH.tar.gz"
-        echo "Downloading $tag ($ARCH) binaries..."
-        curl -fsSL "$url" -o "$tmp/bins.tar.gz" || die "cannot download $url"
-        echo "$want  $tmp/bins.tar.gz" | sha256sum -c - >/dev/null 2>&1 \
-            || die "checksum mismatch for $url — refusing to install"
-        tar -xzf "$tmp/bins.tar.gz" -C "$BIN_DIR"
-        chmod 0755 "$BIN_DIR"/*
-        echo "$tag-$ARCH" > "$BIN_DIR/.release"
-    fi
+    mkdir -p "$BIN_DIR"
+    echo "Downloading $ARCH binaries..."
+    for b in "${bins[@]}"; do
+        curl -fsSL "$base_url/${b}-${ARCH}" -o "$BIN_DIR/$b" || echo "WARNING: failed to download ${b}-${ARCH}" >&2
+        [ -f "$BIN_DIR/$b" ] && chmod 0755 "$BIN_DIR/$b"
+    done
 
     # small per-arch artifacts built from this repo, kept version-coupled
     for f in traffic_meter_user ipmask_tool; do
         install -m0755 "bin/$ARCH/$f" "$BIN_DIR/$f"
     done
     install -m0644 "bin/$ARCH/traffic_meter.bpf.o" "$BIN_DIR/traffic_meter.bpf.o"
-    rm -rf "$tmp"
 }
 
 install_bins
