@@ -170,9 +170,13 @@ async function loadKernelTuning() {
       if (rules.length === 0) {
         chipsEl.innerHTML = '<span class="port-chip" style="color:var(--text3)">None configured</span>';
       } else {
-        chipsEl.innerHTML = rules.map(rule =>
-          `<span class="port-chip udp">${escHtml(rule.dport)} → :${escHtml(rule.redirect)}</span>`
-        ).join('');
+        chipsEl.innerHTML = rules.map(rule => {
+          let pfx = '';
+          if (rule.interface && rule.interface !== 'auto') {
+            pfx = `<span style="opacity:0.75;margin-right:3px">[${escHtml(rule.interface)}]</span>`;
+          }
+          return `<span class="port-chip udp">${pfx}${escHtml(rule.dport)} → :${escHtml(rule.redirect)}</span>`;
+        }).join('');
       }
     }
   } catch (e) {
@@ -201,9 +205,9 @@ function populateTuningModal() {
     tbody.innerHTML = '';
     const rules = _tuningData.routing.rules || [];
     if (rules.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:14px">No active forwarding rules</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:14px">No active forwarding rules</td></tr>';
     } else {
-      rules.forEach(r => addModalRoutingRow(r.proto, r.dport, r.redirect));
+      rules.forEach(r => addModalRoutingRow(r.proto, r.dport, r.redirect, r.interface || 'auto'));
     }
   }
 }
@@ -215,11 +219,27 @@ function setModalBufferPreset(val) {
   if (w) w.value = val;
 }
 
-function addModalRoutingRow(proto = 'udp', dport = '', redirect = '') {
+function addModalRoutingRow(proto = 'udp', dport = '', redirect = '', iface = 'auto') {
   const tbody = document.getElementById('modalRoutingBody');
   if (!tbody) return;
   if (tbody.children.length === 1 && tbody.children[0].children.length === 1) {
     tbody.innerHTML = '';
+  }
+
+  const detected = (_tuningData && _tuningData.routing && _tuningData.routing.detected_interface) || 'default';
+  const avail = (_tuningData && _tuningData.routing && _tuningData.routing.available_interfaces) || [];
+
+  let ifaceOpts = `
+    <option value="auto" ${iface === 'auto' ? 'selected' : ''}>Auto (${detected})</option>
+    <option value="all" ${iface === 'all' ? 'selected' : ''}>All (Any)</option>
+  `;
+
+  avail.forEach(name => {
+    ifaceOpts += `<option value="${escHtml(name)}" ${iface === name ? 'selected' : ''}>${escHtml(name)}</option>`;
+  });
+
+  if (iface && iface !== 'auto' && iface !== 'all' && !avail.includes(iface)) {
+    ifaceOpts += `<option value="${escHtml(iface)}" selected>${escHtml(iface)}</option>`;
   }
 
   const tr = document.createElement('tr');
@@ -228,6 +248,11 @@ function addModalRoutingRow(proto = 'udp', dport = '', redirect = '') {
       <select class="m-rule-proto" style="padding:4px;font-size:11px;font-family:var(--font-mono)">
         <option value="udp" ${proto === 'udp' ? 'selected' : ''}>UDP</option>
         <option value="tcp" ${proto === 'tcp' ? 'selected' : ''}>TCP</option>
+      </select>
+    </td>
+    <td style="padding:4px 6px">
+      <select class="m-rule-iface" style="padding:4px;font-size:11px;font-family:var(--font-mono)">
+        ${ifaceOpts}
       </select>
     </td>
     <td style="padding:4px 6px">
@@ -248,7 +273,7 @@ function removeModalRoutingRow(btn) {
   if (tr) tr.remove();
   const tbody = document.getElementById('modalRoutingBody');
   if (tbody && tbody.children.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:14px">No active forwarding rules</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:14px">No active forwarding rules</td></tr>';
   }
 }
 
@@ -264,14 +289,17 @@ async function saveModalTuning() {
   if (tbody) {
     tbody.querySelectorAll('tr').forEach(tr => {
       const protoEl = tr.querySelector('.m-rule-proto');
+      const ifaceEl = tr.querySelector('.m-rule-iface');
       const dportEl = tr.querySelector('.m-rule-dport');
       const redirEl = tr.querySelector('.m-rule-redirect');
       if (protoEl && dportEl && redirEl) {
         const dport = dportEl.value.trim();
         const redirect = redirEl.value.trim();
+        const iface = ifaceEl ? ifaceEl.value : 'auto';
         if (dport && redirect) {
           rules.push({
             proto: protoEl.value,
+            interface: iface,
             dport: dport,
             redirect: redirect
           });

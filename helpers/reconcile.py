@@ -85,6 +85,13 @@ def _render_sysctl(cfg: dict) -> str:
     )
 
 
+def _list_system_interfaces() -> list[str]:
+    net_path = Path("/sys/class/net")
+    if net_path.is_dir():
+        return sorted([p.name for p in net_path.iterdir() if p.name != "lo"])
+    return []
+
+
 def _detect_interface(cfg: dict) -> str:
     r = cfg.get("routing") or {}
     iface = r.get("interface", "auto")
@@ -108,8 +115,8 @@ def _detect_interface(cfg: dict) -> str:
 def _render_routing(cfg: dict) -> str:
     r = cfg.get("routing") or {}
     rules = r.get("rules") or []
-    iface = _detect_interface(cfg)
-    iif_clause = f'iifname "{iface}" ' if iface and r.get("interface") != "all" else ""
+    cfg_iface = r.get("interface", "auto")
+    default_iface = _detect_interface(cfg)
 
     lines = [
         "# Managed by srtunnel reconcile",
@@ -123,6 +130,16 @@ def _render_routing(cfg: dict) -> str:
         proto = rule.get("proto", "udp")
         dport = str(rule.get("dport", "")).replace(":", "-")
         redirect = str(rule.get("redirect", ""))
+        rule_iface = (rule.get("interface") or "auto").strip()
+
+        if rule_iface == "auto":
+            target_iface = default_iface if cfg_iface != "all" else ""
+        elif rule_iface in ("all", "any", "*"):
+            target_iface = ""
+        else:
+            target_iface = rule_iface
+
+        iif_clause = f'iifname "{target_iface}" ' if target_iface else ""
         lines.append(f"        {iif_clause}{proto} dport {dport} redirect to :{redirect}")
     lines.append("    }")
     lines.append("}")

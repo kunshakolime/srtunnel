@@ -495,7 +495,7 @@
 
 <!-- ── NETWORK TUNING MODAL ────────────────────────────────────────────────── -->
 <div id="tuningModal" class="modal">
-  <div class="modal-box" style="max-width:500px">
+  <div class="modal-box" style="max-width:560px">
     <h4>Network &amp; Buffer Tuning</h4>
 
     <div style="margin-bottom:18px">
@@ -526,13 +526,14 @@
         <span style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.8px">Forwarding Rules</span>
         <button type="button" class="btn-sm" onclick="addModalRoutingRow()">＋ Add Rule</button>
       </div>
-      <div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:4px">
+      <div style="max-height:190px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:4px">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead>
             <tr style="color:var(--text3);font-size:10px;text-align:left">
-              <th style="padding:4px 6px;width:70px">Proto</th>
+              <th style="padding:4px 6px;width:60px">Proto</th>
+              <th style="padding:4px 6px;width:115px">Interface</th>
               <th style="padding:4px 6px">Port / Range</th>
-              <th style="padding:4px 6px">Forward To</th>
+              <th style="padding:4px 6px;width:80px">Forward To</th>
               <th style="padding:4px 6px;width:24px"></th>
             </tr>
           </thead>

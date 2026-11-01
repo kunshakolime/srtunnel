@@ -283,6 +283,7 @@ class RoutingRule(BaseModel):
     proto: str = "udp"
     dport: Union[str, int]
     redirect: Union[str, int]
+    interface: Optional[str] = "auto"
 
 class RoutingUpdateRequest(BaseModel):
     enabled: Optional[bool] = None
@@ -312,9 +313,11 @@ def get_kernel_tuning(user: CurrentUser):
             "proto": r.get("proto", "udp"),
             "dport": str(r.get("dport", "")),
             "redirect": str(r.get("redirect", "")),
+            "interface": r.get("interface", "auto"),
         })
 
     detected_iface = reconcile._detect_interface(cfg_data)
+    available_ifaces = reconcile._list_system_interfaces()
 
     return {
         "sysctl": {
@@ -331,6 +334,7 @@ def get_kernel_tuning(user: CurrentUser):
             "enabled": r_cfg.get("enabled", True),
             "interface": r_cfg.get("interface", "auto"),
             "detected_interface": detected_iface,
+            "available_interfaces": available_ifaces,
             "rules": rules,
         }
     }
