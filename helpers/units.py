@@ -5,6 +5,7 @@ The set of systemd units srtunnel owns (everything in configs/units/) and
 their current state. One source of truth for the CLI and the HTTP adapter.
 """
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -41,24 +42,22 @@ def states(names: list[str] | None = None) -> dict[str, dict]:
     except (OSError, subprocess.TimeoutExpired):
         return out
 
-    current = None
-    for line in r.stdout.splitlines():
-        key, _, value = line.partition("=")
-        if key == "Id":
-            current = value.removesuffix(".service")
+    for block in re.split(r"\n\s*\n", r.stdout.strip()):
+        props = {}
+        for line in block.splitlines():
+            k, _, v = line.partition("=")
+            if k and v:
+                props[k] = v
+        name = props.get("Id", "").removesuffix(".service")
+        if not name or name not in out:
             continue
-        rec = out.get(current or "")
-        if rec is None:
-            continue
-        if key == "ActiveState":
-            rec["active"] = value
-        elif key == "UnitFileState":
-            rec["enabled"] = value in ("enabled", "enabled-runtime")
-        elif key == "MainPID":
-            try:
-                rec["pid"] = int(value)
-            except ValueError:
-                rec["pid"] = 0
+        rec = out[name]
+        rec["active"] = props.get("ActiveState", "unknown")
+        rec["enabled"] = props.get("UnitFileState") in ("enabled", "enabled-runtime")
+        try:
+            rec["pid"] = int(props.get("MainPID", 0))
+        except ValueError:
+            rec["pid"] = 0
     return out
 
 

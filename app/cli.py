@@ -69,7 +69,19 @@ def collect_status() -> dict:
 
     unit_rows = []
     for name, st in units.states().items():
-        st["ports"] = sorted(ports.get(st["pid"], set()))
+        unit_pids = {st["pid"]} if st.get("pid") else set()
+        if st.get("pid"):
+            try:
+                import psutil
+                proc = psutil.Process(st["pid"])
+                for child in proc.children(recursive=True):
+                    unit_pids.add(child.pid)
+            except Exception:
+                pass
+        st_ports = set()
+        for pid in unit_pids:
+            st_ports.update(ports.get(pid, set()))
+        st["ports"] = sorted(st_ports)
         unit_rows.append(st)
 
     drift = [
@@ -92,10 +104,10 @@ def collect_status() -> dict:
 
 def _print_status(s: dict) -> None:
     print(f"srtunnel {s['version']}  {s['base_dir']}")
-    print(f"{'UNIT':<14}{'ACTIVE':<10}{'ENABLED':<10}{'PID':<8}PORTS")
+    print(f"{'UNIT':<18}{'ACTIVE':<10}{'ENABLED':<10}{'PID':<8}PORTS")
     for u in s["units"]:
         ports = ",".join(str(p) for p in u["ports"]) or "-"
-        print(f"{u['name']:<14}{u['active']:<10}{'yes' if u['enabled'] else 'no':<10}"
+        print(f"{u['name']:<18}{u['active']:<10}{'yes' if u['enabled'] else 'no':<10}"
               f"{u['pid'] or '-':<8}{ports}")
     print()
     print(f"users: {s['users'] if s['users'] is not None else 'n/a'}   "
