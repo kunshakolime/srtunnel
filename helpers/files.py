@@ -1,15 +1,21 @@
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger("srapi.files")
+
 
 def read_file(file_path: str) -> str:
     path = Path(file_path)
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         raise FileNotFoundError(f"File not found: {file_path}")
-    return path.read_text(encoding='utf-8')
+    try:
+        return path.read_text(encoding='utf-8')
+    except UnicodeDecodeError:
+        return path.read_text(encoding='utf-8', errors='replace')
 
 
 def write_file(file_path: str, content: str) -> None:
@@ -37,31 +43,66 @@ def write_json_file(file_path: str, data: Any, indent: int = 2) -> None:
 def list_directory(directory: str) -> Dict:
     """List directory contents with file info."""
     path = Path(directory)
-    if not path.exists():
+    try:
+        if not path.is_dir():
+            return {"exists": False, "files": [], "dirs": []}
+    except (PermissionError, OSError):
         return {"exists": False, "files": [], "dirs": []}
-    
+
     files = []
     dirs = []
-    
+
     try:
-        for item in sorted(path.iterdir()):
-            stat = item.stat()
-            info = {
-                "name": item.name,
-                "size": stat.st_size if item.is_file() else 0,
-                "mtime": stat.st_mtime,
-                "is_dir": item.is_dir(),
-                "is_file": item.is_file(),
-                "mode": oct(stat.st_mode)[-3:],
-            }
-            if item.is_dir():
-                dirs.append(info)
-            else:
-                files.append(info)
-    except PermissionError as e:
-        logger.error(f"Permission Denied accessing {path}: {e}")
+        items = sorted(path.iterdir(), key=lambda p: p.name.lower())
+    except (PermissionError, OSError) as e:
+        logger.warning(f"Error accessing {path}: {e}")
         return {"exists": True, "error": str(e), "files": [], "dirs": []}
-        
+
+    for item in items:
+        is_symlink = False
+        try:
+            is_symlink = item.is_symlink()
+        except (OSError, PermissionError):
+            pass
+
+        stat = None
+        try:
+            stat = item.stat()
+        except (FileNotFoundError, PermissionError, OSError):
+            try:
+                stat = item.stat(follow_symlinks=False)
+            except (FileNotFoundError, PermissionError, OSError):
+                stat = None
+
+        is_dir = False
+        is_file = False
+        try:
+            is_dir = item.is_dir()
+            is_file = item.is_file()
+        except (PermissionError, OSError):
+            if stat:
+                import stat as stat_mod
+                is_dir = stat_mod.S_ISDIR(stat.st_mode)
+                is_file = stat_mod.S_ISREG(stat.st_mode)
+
+        size = (stat.st_size if (stat and is_file) else 0) if stat else 0
+        mtime = stat.st_mtime if stat else 0
+        mode = oct(stat.st_mode)[-3:] if stat else "000"
+
+        info = {
+            "name": item.name,
+            "size": size,
+            "mtime": mtime,
+            "is_dir": is_dir,
+            "is_file": is_file,
+            "is_symlink": is_symlink,
+            "mode": mode,
+        }
+        if is_dir:
+            dirs.append(info)
+        else:
+            files.append(info)
+
     return {"exists": True, "path": str(path), "files": files, "dirs": dirs}
 
 
