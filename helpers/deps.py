@@ -29,13 +29,6 @@ def load_config():
         "DNSTT":            app.get("dnstt", ""),
         "KEY":              app.get("slowdnskey", ""),
         "IFACE":            app.get("interface", "eth0"),
-        "CF_TOKEN":         app.get("cf_token", ""),
-        "CF_ZONE":          app.get("cf_zone", ""),
-        "CF_ROOT_DOMAIN":   app.get("cf_root_domain", ""),
-        "XRAY_INBOUND_TAG": app.get("xray_inbound_tag", "xray-vless"),
-        "XRAY_CONFIG":      app.get("xray_config", str(BASE_DIR / "configs" / "xray.json")),
-        "XRAY_API_PORT":    app.get("xray_api_port", 10085),
-        "XRAY_BINARY":      app.get("xray_binary", str(BASE_DIR / "bin" / "xray")),
     }
 
 cfg = load_config()

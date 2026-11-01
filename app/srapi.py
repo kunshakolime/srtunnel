@@ -14,14 +14,13 @@ try:
 except Exception:
     pass
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging, traceback, time
 
 from helpers import core, monitor
-from helpers.auth import get_current_user
 from helpers.deps import cfg
 
 # ── Logging ───────────────────────────────────────────────────────────────────

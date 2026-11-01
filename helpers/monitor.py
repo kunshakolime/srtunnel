@@ -237,7 +237,7 @@ import threading
 
 _system_cache = {}
 
-def _background_sampler(iface, interval=2):
+def _background_sampler(iface, interval=3):
     while True:
         try:
             info = system_info() or {}
