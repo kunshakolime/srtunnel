@@ -73,10 +73,6 @@ install_bins() {
 }
 
 if [[ "$UPDATE_ONLY" == "1" ]]; then
-    if [[ -x "$BOT_DIR/venv/bin/python" && -f "$BOT_DIR/app/cli.py" ]]; then
-        "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" bin --update
-        exit 0
-    fi
     echo "Updating binaries in $BIN_DIR..."
     install_bins
     echo "Restarting active services..."

@@ -170,18 +170,23 @@ def cmd_version(args) -> int:
 
 
 def cmd_bin(args) -> int:
-    from helpers import bins
-
     if getattr(args, "update", False):
-        return bins.update_bins(restart=not getattr(args, "no_restart", False))
+        installer = BASE_DIR / "scripts" / "debinstall.sh"
+        res = subprocess.run(["bash", str(installer), "-u"])
+        return res.returncode
 
     print(BIN_DIR)
-    installed = bins.list_bins()
-    if not BIN_DIR.is_dir() or not installed:
+    if not BIN_DIR.is_dir():
         print("  (not installed — run scripts/debinstall.sh or srtunnel bin --update)", file=sys.stderr)
         return 1
-    for name in installed:
-        print(f"  {name}")
+    found = False
+    for p in sorted(BIN_DIR.iterdir()):
+        if p.is_file() and not p.name.startswith("."):
+            print(f"  {p.name}")
+            found = True
+    if not found:
+        print("  (no binaries installed — run scripts/debinstall.sh -u)", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -260,14 +265,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("bin", help="list or update installed release binaries")
     p.add_argument("-u", "--update", action="store_true",
                    help="download latest binaries from GitHub release")
-    p.add_argument("--no-restart", action="store_true",
-                   help="do not restart active services after update")
     p.set_defaults(func=cmd_bin)
 
     p = sub.add_parser("update", help="update release binaries to latest")
-    p.add_argument("--no-restart", action="store_true",
-                   help="do not restart active services after update")
-    p.set_defaults(func=lambda args: __import__("helpers.bins", fromlist=["update_bins"]).update_bins(restart=not args.no_restart))
+    p.set_defaults(func=lambda args: subprocess.run(["bash", str(BASE_DIR / "scripts" / "debinstall.sh"), "-u"]).returncode)
 
     p = sub.add_parser("exec", help="run an installed binary: srtunnel exec NAME [args]")
     p.add_argument("name")
