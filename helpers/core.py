@@ -2,7 +2,7 @@ import sqlite3, datetime, random, string, os, shutil, logging, uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from helpers import ssh, zivpn, xray2 as xray
+from helpers import ssh, zivpn
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 cfg = {}
 
-ALL_SERVICES = {"ssh", "zivpn", "xray"}
+ALL_SERVICES = {"ssh", "zivpn"}
 
 def init(config: dict):
     """Call this once at startup with the loaded config dict."""
@@ -137,7 +137,6 @@ def sync():
     # ── SSH provisioning ──────────────────────────────────────────────────────
     ssh_active   = {u: d for u, d in active.items() if "ssh"   in d["services"]}
     zivpn_active = {u: d for u, d in active.items() if "zivpn" in d["services"]}
-    xray_active  = {u: d for u, d in active.items() if "xray"  in d["services"]}
 
     for u, d in ssh_active.items():
         if not ssh.user_exists(u):
@@ -153,15 +152,11 @@ def sync():
         _c("DEFAULT_PASSWORD", "123"),
     )
 
-    # ── Xray ─────────────────────────────────────────────────────────────────
-    # Sync disabled - XUI panel manages xray separately
-    
     return {
         "success":       zivpn_ok,
         "deleted_count": deleted,
         "ssh_count":     len(ssh_active),
         "zivpn_count":  len(zivpn_active),
-        "xray_count":   len(xray_active),
     }
 
 
@@ -192,8 +187,8 @@ def add_user(username, password=None, days=None, temporary=False, max_logins=Non
     """
     Create a user and provision them on the requested services.
 
-    services: list/set of service names, e.g. ["ssh", "xray"]
-              Defaults to all services (ssh, zivpn, xray) if omitted.
+    services: list/set of service names, e.g. ["ssh", "zivpn"]
+              Defaults to all services (ssh, zivpn) if omitted.
     """
     if username.lower() == 'root':
         return False, None, None, False, "root_forbidden"

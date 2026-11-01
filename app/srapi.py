@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging, traceback, time
 
-from helpers import core, dns, monitor
+from helpers import core, monitor
 from helpers.auth import get_current_user
 from helpers.deps import cfg
 
@@ -41,7 +41,6 @@ async def lifespan(app: FastAPI):
     logger.info("srapi starting up")
     try:
         core.init(cfg)
-        dns.init(cfg)
         core.init_db()
         monitor.start_sampler(cfg.get("IFACE", "eth0"))
     except Exception as e:

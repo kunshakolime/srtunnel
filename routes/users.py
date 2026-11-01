@@ -3,9 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 
-from helpers import core, xray2 as xray, monitor
+from helpers import core, monitor
 from helpers.deps import CurrentUser, load_scope
-import requests as http_requests
 
 logger = logging.getLogger("srapi.users")
 router = APIRouter(prefix="/api")
@@ -20,7 +19,6 @@ class CreateUserRequest(BaseModel):
     temporary:     Optional[bool]      = False
     max_logins:    Optional[int]       = None
     services:      Optional[list[str]] = None
-    xray_inbounds: Optional[list[str]] = None
 
 class PasswordRequest(BaseModel):
     password: Optional[str] = None
@@ -90,27 +88,6 @@ def create_user(data: CreateUserRequest, user: CurrentUser):
     if data.services and any(s in data.services for s in ("ssh", "zivpn")):
         core.sync()
 
-    xray_results = []
-    if data.xray_inbounds and "xray" in (user_obj.get("services") or []):
-        user_uuid = user_obj.get("uuid")
-        logger.info("Xray: using UUID=%s from DB", user_uuid)
-        for tag in data.xray_inbounds:
-            email = f"{data.username}@{tag}"
-            try:
-                existing = xray.list_users(tag)
-            except RuntimeError:
-                existing = []
-            if any(u.get("email") == email for u in existing):
-                xray_results.append({"tag": tag, "ok": True, "id": user_uuid})
-                continue
-            try:
-                xray.add_user(tag, email, user_uuid=user_uuid)
-                xray_results.append({"tag": tag, "ok": True, "id": user_uuid})
-                logger.info("Xray user added: %s to %s", email, tag)
-            except (RuntimeError, KeyError, http_requests.HTTPError) as e:
-                xray_results.append({"tag": tag, "ok": False, "error": str(e)})
-                logger.warning("Xray user add failed: %s to %s — %s", email, tag, e)
-
     return {
         "username":   data.username,
         "password":   password,
@@ -119,7 +96,6 @@ def create_user(data: CreateUserRequest, user: CurrentUser):
         "max_logins": max_logins,
         "services":   user_obj.get("services", []) if user_obj else [],
         "linux_ok":   linux_ok,
-        "xray":       xray_results,
     }
 
 @router.get("/users/{username}")
@@ -136,25 +112,9 @@ def delete_user(username: str, user: CurrentUser):
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
 
-    xray_results = []
-    if "xray" in (u.get("services") or []):
-        try:
-            inbounds = xray.list_inbounds()
-        except RuntimeError:
-            inbounds = []
-        for ib in inbounds:
-            tag   = ib.get("tag")
-            email = f"{username}@{tag}"
-            try:
-                xray.remove_user(tag, email)
-                xray_results.append({"tag": tag, "ok": True})
-            except (RuntimeError, KeyError, http_requests.HTTPError) as e:
-                xray_results.append({"tag": tag, "ok": False, "error": str(e)})
-            logger.info("delete_user xray: %s -> %s", email, xray_results[-1])
-
     core.delete_user(username)
     logger.info("User deleted: %s by %s", username, user)
-    return {"status": "deleted", "xray": xray_results}
+    return {"status": "deleted"}
 
 @router.post("/users/{username}/password")
 def change_password(username: str, data: PasswordRequest, user: CurrentUser):

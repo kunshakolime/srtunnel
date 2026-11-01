@@ -39,16 +39,11 @@ telegram_bot:
   token: ""                              # ← put your Telegram bot token here
   primary_url: "http://127.0.0.1:57000"
   domain: "example.com"                  # ← put your main domain here
-  cf_root_domain: "example.com"          # ← root domain for DNS management
-  cf_token: ""
-  cf_zone:  ""
   dnstt: "sd.example.com"
   slowdnskey: "./slowdns.pub"
   interface: "eth0"
   bandwidth_down: "? Mbps"
   bandwidth_up: "? Mbps"
-  xray_config: "/opt/srtunnel/configs/xray.json"
-  xray_inbound_tag: "xray-vless"
 websocket:
   # WebSocket Tunnel Server Configuration
   # NOTE: plain HTTP only, bound to localhost. nginx owns the public sockets
@@ -103,6 +98,3 @@ stunnel:
       listen: 0.0.0.0:8443
       default_backend:
         - 127.0.0.1:7000
-xui_panel:
-  url: "http://127.0.0.1:57001/3x-ui/"
-  token: "changeme"

@@ -186,9 +186,7 @@ def build_main_kb(multi: bool = False) -> InlineKeyboardMarkup:
          InlineKeyboardButton("🎯 Services",    callback_data="services_menu")],
         [InlineKeyboardButton("🚀 Speed Test",  callback_data="speedtest"),
          InlineKeyboardButton("💾 Backup",      callback_data="backup_menu")],
-        [InlineKeyboardButton("🌐 DNS",         callback_data="dns_menu"),
-         InlineKeyboardButton("📁 Files",       callback_data="file_manager")],
-        [InlineKeyboardButton("⚡ Xray",        callback_data="xray_menu"),
+        [InlineKeyboardButton("📁 Files",       callback_data="file_manager"),
          InlineKeyboardButton("🔧 Scope",       callback_data="scope_menu")],
         [InlineKeyboardButton("🖧 Serverlist",  callback_data="serverlist_menu"),
          InlineKeyboardButton("🔑 Tokens",      callback_data="tokens_menu")],
@@ -874,169 +872,8 @@ async def _dispatch(q, update, context, uid, server, sess, data, leave_menu):  #
             f"*✏️ Edit {fname}*\n\nSend the new file content.\n\n/cancel to go back",
             parse_mode="Markdown", reply_markup=kb_files())
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # DNS
-    # ══════════════════════════════════════════════════════════════════════════
-    elif data == "dns_menu":
-        leave_menu()
-        try:
-            records = await api_get(server, "/api/dns")
-            count   = len(records) if isinstance(records, list) else 0
-            msg     = f"*🌐 DNS Manager*\n\n{count} record(s)"
-        except ApiError as e:
-            msg = f"*🌐 DNS Manager*\n\n⚠️ {e.detail}"
-        await q.edit_message_text(msg, parse_mode="Markdown",
-            reply_markup=kb([("➕ New",    "dns_new"),  ("📋 List",  "dns_list")],
-                            [("🗑 Delete", "dns_delete_pick")],
-                            [("🔙 Menu",  "back_to_menu")]))
-
-    elif data == "dns_list":
-        records = await api_get(server, "/api/dns")
-        if not records:
-            await q.edit_message_text("ℹ️ No DNS records", reply_markup=kb_dns()); return
-        CHUNK  = 20
-        chunks = [records[i:i+CHUNK] for i in range(0, len(records), CHUNK)]
-        for idx, batch in enumerate(chunks):
-            lines = [f"*📋 DNS ({idx*CHUNK+1}–{idx*CHUNK+len(batch)} / {len(records)})*\n"]
-            for rec in batch:
-                pr = "🟠" if rec.get("proxied") else "⚪"
-                lines.append(f"{pr} `{rec['name']}` → `{rec['content']}` *{rec['type']}*")
-            is_last = idx == len(chunks) - 1
-            markup  = kb_dns() if is_last else None
-            if idx == 0: await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
-            else:        await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
-
-    elif data == "dns_new":
-        DNS_TYPES = ["A","AAAA","CNAME","TXT","MX","NS","SRV"]
-        rows = [[InlineKeyboardButton(t, callback_data=f"dnstype_{t}")] for t in DNS_TYPES]
-        rows.append([InlineKeyboardButton("❌ Cancel", callback_data="dns_menu")])
-        await q.edit_message_text("*➕ New DNS Record*\n\nSelect type:",
-                                  parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
-
-    elif data.startswith("dnstype_"):
-        rtype = data[8:]
-        context.user_data.update(dns_rtype=rtype, action="dns_name")
-        await q.edit_message_text(
-            f"*Type: {rtype}*\n\nEnter subdomain name:\n\n/cancel to go back",
-            parse_mode="Markdown", reply_markup=kb([("❌ Cancel", "dns_menu")]))
-
-    elif data.startswith("dnsproxy_"):
-        proxied = data == "dnsproxy_yes"
-        rtype   = context.user_data.get("dns_rtype", "A")
-        name    = context.user_data.get("dns_name", "")
-        value   = context.user_data.get("dns_value", "")
-        context.user_data.clear()
-        r   = await api_post(server, "/api/dns",
-                             json={"type": rtype, "name": name, "value": value, "proxied": proxied})
-        rid = r.get("id") if isinstance(r, dict) else None
-        pl  = "🟠 Proxied" if proxied else "⚪ DNS only"
-        msg = f"✅ *DNS Created*\n\n`{r.get('name', name)}`\n`{rtype}` · {pl}\n`{value}`"
-        rows = []
-        if rid: rows.append([InlineKeyboardButton("🗑 Delete", callback_data=f"del_dns_{rid}")])
-        rows.append([InlineKeyboardButton("🔙 DNS", callback_data="dns_menu")])
-        await q.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
-
-    elif data.startswith("del_dns_"):
-        await api_delete(server, f"/api/dns/{data[8:]}")
-        await q.edit_message_text("🗑 Record deleted.", reply_markup=kb_dns())
-
-    elif data == "dns_delete_pick":
-        records = await api_get(server, "/api/dns")
-        if not records:
-            await q.edit_message_text("ℹ️ No records", reply_markup=kb_dns()); return
-        context.user_data.update(dns_delete_records=records, action="dns_delete_pick")
-        CHUNK  = 20
-        chunks = [records[i:i+CHUNK] for i in range(0, len(records), CHUNK)]
-        for idx, batch in enumerate(chunks):
-            is_last = idx == len(chunks) - 1
-            lines   = [f"*🗑 Delete Record ({idx*CHUNK+1}–{idx*CHUNK+len(batch)} / {len(records)})*\n"]
-            for i, rec in enumerate(batch, idx*CHUNK+1):
-                pr = "🟠" if rec.get("proxied") else "⚪"
-                lines.append(f"`{i}.` {pr} `{rec['name']}` · *{rec['type']}*")
-            if is_last: lines.append("\n_Reply with record number_")
-            markup = kb([("❌ Cancel", "dns_menu")]) if is_last else None
-            if idx == 0: await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
-            else:        await q.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=markup)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # XRAY
-    # ══════════════════════════════════════════════════════════════════════════
-    elif data == "xray_menu":
-        leave_menu()
-        inbounds = await api_get(server, "/api/xray/inbounds")
-        rows = []
-        if isinstance(inbounds, list):
-            for ib in inbounds:
-                tag   = ib.get("tag", "?")
-                proto = ib.get("protocol", "")
-                port  = ib.get("port", "")
-                rows.append([InlineKeyboardButton(
-                    f"📡 {tag} ({proto}:{port})", callback_data=f"xray_ib_{tag}")])
-        rows.append([InlineKeyboardButton("👥 All Users", callback_data="xray_all_users"),
-                     InlineKeyboardButton("➕ Add Inbound", callback_data="xray_add_inbound")])
-        rows.append([InlineKeyboardButton("🔙 Menu",        callback_data="back_to_menu")])
-        await q.edit_message_text(
-            f"*⚡ Xray Inbounds* — {len(rows)-2} configured",
-            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
-
-    elif data.startswith("xray_ib_"):
-        tag     = data[8:]
-        users   = await api_get(server, f"/api/xray/inbounds/{tag}/users")
-        u_count = len(users) if isinstance(users, list) else 0
-        await q.edit_message_text(
-            f"*📡 Xray: {tag}*\n\n{u_count} user(s)", parse_mode="Markdown",
-            reply_markup=kb([("👥 Users",      f"xray_users_{tag}"),
-                             ("🗑 Del Inbound", f"xray_del_ib_{tag}")],
-                            [("🔙 Xray",        "xray_menu")]))
-
-    elif data.startswith("xray_users_"):
-        tag   = data[11:]
-        users = await api_get(server, f"/api/xray/inbounds/{tag}/users")
-        if not users:
-            await q.edit_message_text(f"ℹ️ No users in `{tag}`",
-                                      parse_mode="Markdown", reply_markup=kb_xray()); return
-        lines = [f"*👥 Xray — {tag}*\n"]
-        for u in users:
-            lines.append(f"• `{u.get('username','?')}` `{(u.get('id') or '')[:8]}…`")
-        rows = [[InlineKeyboardButton(f"➕ Add User", callback_data=f"xray_adduser_{tag}")]]
-        for u in users[:8]:
-            un = u.get("username", "")
-            rows.append([InlineKeyboardButton(f"🗑 {un}",
-                                              callback_data=f"xray_deluser_{tag}__{un}")])
-        rows.append([InlineKeyboardButton("🔙 Xray", callback_data="xray_menu")])
-        await q.edit_message_text("\n".join(lines), parse_mode="Markdown",
-                                  reply_markup=InlineKeyboardMarkup(rows))
-
-    elif data.startswith("xray_adduser_"):
-        tag = data[13:]
-        context.user_data.update(action="xray_adduser", xray_tag=tag)
-        await q.edit_message_text(
-            f"*➕ Xray User — {tag}*\n\n"
-            "Send: `username [uuid] [flow]`\n"
-            "Leave uuid blank to auto-generate.\n\n/cancel to go back",
-            parse_mode="Markdown", reply_markup=kb_xray())
-
-    elif data.startswith("xray_del_ib_"):
-        tag = data[12:]
-        await api_delete(server, f"/api/xray/inbounds/{tag}")
-        await q.edit_message_text(f"🗑 Inbound `{tag}` deleted",
-                                  parse_mode="Markdown", reply_markup=kb_xray())
-
-    elif data.startswith("xray_deluser_"):
-        parts = data[13:].split("__", 1)
-        tag, un = parts[0], parts[1] if len(parts) > 1 else ""
-        await api_delete(server, f"/api/xray/inbounds/{tag}/users/{un}")
-        await q.edit_message_text(f"🗑 `{un}` removed from `{tag}`",
-                                  parse_mode="Markdown", reply_markup=kb_xray())
-
-    elif data == "xray_add_inbound":
-        context.user_data["action"] = "xray_add_inbound"
-        await q.edit_message_text(
-            "*➕ Add Xray Inbound*\n\n"
-            "Send a JSON inbound config:\n"
-            '```\n{"tag":"vless-in","protocol":"vless","port":443,"settings":{}}\n```'
-            "\n\n/cancel to go back",
-            parse_mode="Markdown", reply_markup=kb_xray())
+    elif data in ("dns_menu", "xray_menu") or data.startswith(("dns_", "xray_", "del_dns_")):
+        await q.edit_message_text("ℹ️ DNS and Xray are managed outside the bot (Xray is in 3x-ui).", reply_markup=kb_menu())
 
     # ══════════════════════════════════════════════════════════════════════════
     # SCOPE
@@ -1201,26 +1038,17 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
 
-async def _finish_add_user(update, server, username, days, temporary, password, max_logins, xray_inbounds):
+async def _finish_add_user(update, server, username, days, temporary, password, max_logins):
     payload = {"username": username, "temporary": temporary}
     if days:       payload["days"]       = days
     if password:   payload["password"]   = password
     if max_logins: payload["max_logins"] = max_logins
-    if xray_inbounds:
-        payload["services"] = ["ssh", "xray"]
-        payload["xray_inbounds"] = xray_inbounds
     r = await api_post(server, "/api/users", json=payload)
     msg = (f"✅ *{'Temp' if temporary else 'User'} Added*\n\n"
            f"`{r['username']}` • `{r['password']}`\n"
            f"Expires: {r.get('expires') or 'Never'}")
     if r.get("max_logins"): msg += f"\nMax Logins: {r['max_logins']}"
     if not r.get("linux_ok", True): msg += "\n\n⚠️ Linux user creation failed"
-    xray_results = r.get("xray", [])
-    if xray_results:
-        msg += "\n\n*⚡ Xray:*\n"
-        for xr in xray_results:
-            icon = "✅" if xr.get("ok") else "❌"
-            msg += f"{icon} `{xr['tag']}`\n"
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=kb_menu())
 
 
@@ -1266,66 +1094,7 @@ async def _handle_text(update, context, uid, server, sess, action, text):  # noq
             if len(rest) >= 2 and rest[1].lower() in ("temp","temporary","t"):
                 temporary = True
 
-        context.user_data.update(
-            action="add_user_step3",
-            add_user_username=username,
-            add_user_days=days,
-            add_user_temporary=temporary,
-            add_user_password=password,
-            add_user_max_logins=max_logins,
-        )
-
-        inbounds = await api_get(server, "/api/xray/inbounds")
-        if not isinstance(inbounds, list) or not inbounds:
-            await _finish_add_user(update, server, username, days, temporary, password, max_logins, [])
-            context.user_data.clear()
-            return
-
-        lines = [f"*➕ Add User — Select Inbounds*\n\n"
-                 f"Username: `{username}`\n"]
-        if days: lines.append(f"Days: `{days}`")
-        if temporary: lines.append("Type: `Temporary`")
-        if password: lines.append(f"Password: `{password}`")
-        if max_logins: lines.append(f"Limit: `{max_logins}`")
-        lines.append("\nReply with inbound numbers (comma-separated), or `all`, or `none`:")
-        for i, ib in enumerate(inbounds, 1):
-            tag = ib.get("tag", "?")
-            proto = ib.get("protocol", "")
-            port = ib.get("port", "")
-            lines.append(f"`{i}.` {tag} ({proto}:{port})")
-
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=kb_menu())
-
-    elif action == "add_user_step3":
-        username = context.user_data.pop("add_user_username")
-        days = context.user_data.pop("add_user_days")
-        temporary = context.user_data.pop("add_user_temporary")
-        password = context.user_data.pop("add_user_password")
-        max_logins = context.user_data.pop("add_user_max_logins")
-
-        inbounds = await api_get(server, "/api/xray/inbounds")
-        if not isinstance(inbounds, list):
-            inbounds = []
-
-        selected = []
-        text_lower = text.lower().strip()
-        if text_lower == "none" or text_lower == "0":
-            selected = []
-        elif text_lower == "all":
-            selected = [ib.get("tag") for ib in inbounds if ib.get("tag")]
-        else:
-            indices = [x.strip() for x in text.split(",") if x.strip()]
-            for idx_str in indices:
-                try:
-                    idx = int(idx_str) - 1
-                    if 0 <= idx < len(inbounds):
-                        tag = inbounds[idx].get("tag")
-                        if tag:
-                            selected.append(tag)
-                except ValueError:
-                    pass
-
-        await _finish_add_user(update, server, username, days, temporary, password, max_logins, selected)
+        await _finish_add_user(update, server, username, days, temporary, password, max_logins)
         context.user_data.clear()
 
     elif action == "set_maxlogins":
@@ -1364,53 +1133,6 @@ async def _handle_text(update, context, uid, server, sess, action, text):  # noq
             parse_mode="Markdown", reply_markup=kb_users())
         context.user_data.clear()
 
-    elif action == "dns_name":
-        context.user_data.update(dns_name=text.lower(), action="dns_value")
-        rtype = context.user_data.get("dns_rtype", "A")
-        hint  = {"A":"IPv4","AAAA":"IPv6","CNAME":"target hostname",
-                 "TXT":"text value","MX":"mail server"}.get(rtype, "value")
-        await update.message.reply_text(
-            f"Subdomain: *{text.lower()}*\n\nEnter {hint}:\n\n/cancel to go back",
-            parse_mode="Markdown")
-
-    elif action == "dns_value":
-        NO_PROXY = {"TXT","MX","NS","SRV","CAA"}
-        rtype = context.user_data.get("dns_rtype", "A")
-        name  = context.user_data.get("dns_name", "")
-        context.user_data.update(dns_value=text, action=None)
-        if rtype in NO_PROXY:
-            r   = await api_post(server, "/api/dns",
-                                 json={"type": rtype, "name": name, "value": text, "proxied": False})
-            rid = r.get("id") if isinstance(r, dict) else None
-            msg = f"✅ *DNS Created*\n\n`{r.get('name',name)}`\n`{rtype}` · ⚪\n`{text}`"
-            rows = []
-            if rid: rows.append([InlineKeyboardButton("🗑 Delete", callback_data=f"del_dns_{rid}")])
-            rows.append([InlineKeyboardButton("🔙 DNS", callback_data="dns_menu")])
-            await update.message.reply_text(msg, parse_mode="Markdown",
-                                            reply_markup=InlineKeyboardMarkup(rows))
-            context.user_data.clear()
-        else:
-            await update.message.reply_text(
-                "Proxy through Cloudflare?",
-                reply_markup=kb([("🟠 Proxied", "dnsproxy_yes"), ("⚪ DNS only", "dnsproxy_no")],
-                                [("❌ Cancel",  "dns_menu")]))
-
-    elif action == "dns_delete_pick":
-        try:
-            idx     = int(text) - 1
-            records = context.user_data.get("dns_delete_records", [])
-            if not (0 <= idx < len(records)):
-                await update.message.reply_text("❌ Invalid number", reply_markup=kb_dns())
-                context.user_data.clear(); return
-            rec = records[idx]
-            await api_delete(server, f"/api/dns/{rec['id']}")
-            await update.message.reply_text(
-                f"🗑 Deleted `{rec['name']}` ({rec['type']})",
-                parse_mode="Markdown", reply_markup=kb_dns())
-        except ValueError:
-            await update.message.reply_text("❌ Send a number", reply_markup=kb_dns())
-        context.user_data.clear()
-
     elif action == "file_write":
         fname = context.user_data.pop("file_editing", None)
         if not fname:
@@ -1418,28 +1140,6 @@ async def _handle_text(update, context, uid, server, sess, action, text):  # noq
         await api_put(server, f"/api/files/{fname}", json=text)
         await update.message.reply_text(f"✅ *{fname}* saved",
                                         parse_mode="Markdown", reply_markup=kb_files())
-        context.user_data.clear()
-
-    elif action == "xray_adduser":
-        tag   = context.user_data.pop("xray_tag", None)
-        parts = text.split()
-        un    = parts[0]
-        uid_v = parts[1] if len(parts) > 1 else None
-        flow  = parts[2] if len(parts) > 2 else ""
-        payload = {"username": un, "flow": flow}
-        if uid_v: payload["uid"] = uid_v
-        r = await api_post(server, f"/api/xray/inbounds/{tag}/users", json=payload)
-        await update.message.reply_text(
-            f"✅ `{un}` added to `{tag}`\nUUID: `{r.get('id','?')}`",
-            parse_mode="Markdown", reply_markup=kb_xray())
-        context.user_data.clear()
-
-    elif action == "xray_add_inbound":
-        try:    inbound = _json.loads(text)
-        except: await update.message.reply_text("❌ Invalid JSON"); context.user_data.clear(); return
-        r = await api_post(server, "/api/xray/inbounds", json=inbound)
-        await update.message.reply_text(f"✅ Inbound `{r.get('tag','?')}` added",
-                                        parse_mode="Markdown", reply_markup=kb_xray())
         context.user_data.clear()
 
     elif action == "scope_edit":

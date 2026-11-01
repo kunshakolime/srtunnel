@@ -5,7 +5,7 @@ from typing import Optional, Dict, Union, List
 from pathlib import Path
 import logging, traceback, yaml
 
-from helpers import monitor, dns, speedtest as st
+from helpers import monitor, speedtest as st
 from helpers.deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,12 +31,6 @@ class ServerEntry(BaseModel):
 
 class ServerListRequest(BaseModel):
     servers: list[ServerEntry]
-
-class DnsRecordRequest(BaseModel):
-    type:    str
-    name:    str
-    value:   str
-    proxied: Optional[bool] = False
 
 
 # ── System ────────────────────────────────────────────────────────────────────
@@ -191,38 +185,6 @@ async def merge_db(file: UploadFile = File(...), user: CurrentUser = None):
         raise HTTPException(status_code=400, detail="Invalid database file")
     logger.info("DB merged by %s", user)
     return {"status": "merged"}
-
-
-# ── DNS ───────────────────────────────────────────────────────────────────────
-
-@router.get("/dns")
-def dns_list(user: CurrentUser):
-    if not dns.is_configured():
-        raise HTTPException(status_code=503, detail="Cloudflare not configured")
-    return dns.list_records()
-
-@router.post("/dns")
-def dns_create(data: DnsRecordRequest, user: CurrentUser):
-    if not dns.is_configured():
-        raise HTTPException(status_code=503, detail="Cloudflare not configured")
-    result = dns.create_record(data.type, data.name, data.value, data.proxied)
-    if not result.get("success"):
-        errors = result.get("errors", [])
-        msg    = errors[0].get("message") if errors else "Unknown error"
-        logger.warning("DNS create failed: %s %s → %s: %s", data.type, data.name, data.value, msg)
-        raise HTTPException(status_code=400, detail=msg)
-    logger.info("DNS record created: %s %s → %s by %s", data.type, data.name, data.value, user)
-    return result["result"]
-
-@router.delete("/dns/{record_id}")
-def dns_delete(record_id: str, user: CurrentUser):
-    if not dns.is_configured():
-        raise HTTPException(status_code=503, detail="Cloudflare not configured")
-    result = dns.delete_record(record_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail="Could not delete record")
-    logger.info("DNS record deleted: %s by %s", record_id, user)
-    return {"status": "deleted"}
 
 
 # ── Kernel Tuning (sysctl buffers & nftables port routing) ───────────────────
