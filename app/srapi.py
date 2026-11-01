@@ -17,9 +17,8 @@ except Exception:
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
-from starlette.staticfiles import StaticFiles
-import httpx, yaml, logging, traceback, time
+from fastapi.responses import JSONResponse
+import logging, traceback, time
 
 from helpers import core, dns, monitor
 from helpers.auth import get_current_user
@@ -50,8 +49,6 @@ async def lifespan(app: FastAPI):
         logger.critical(traceback.format_exc())
         raise
     yield
-    if _xui_client and not _xui_client.is_closed:
-        await _xui_client.aclose()
     logger.info("srapi shutting down")
 
 app = FastAPI(lifespan=lifespan)
@@ -119,66 +116,6 @@ app.include_router(system.router)
 app.include_router(systemd.router)
 
 
-# ── 3x-ui proxy ─────────────────────────────────────────────────────────────
-
-_XUI_PANEL_CFG = None
-_xui_client = None
-
-def _get_xui_cfg():
-    global _XUI_PANEL_CFG
-    if _XUI_PANEL_CFG is None:
-        _cfg_path = BASE_DIR / "configs" / "config.yaml"
-        if not _cfg_path.exists():
-            _cfg_path = BASE_DIR / "config.yaml"
-        raw = (yaml.safe_load(_cfg_path.read_text()) or {})
-        _XUI_PANEL_CFG = raw.get("xui_panel") or {}
-    return _XUI_PANEL_CFG
-
-def _get_xui_client():
-    global _xui_client
-    if _xui_client is None or _xui_client.is_closed:
-        _xui_client = httpx.AsyncClient(verify=False, timeout=30)
-    return _xui_client
-
-@app.api_route("/3x-ui/{path:path}", methods=["GET","POST","PUT","DELETE","PATCH","OPTIONS","HEAD"])
-async def proxy_3xui(request: Request, path: str):
-    panel = _get_xui_cfg()
-    base = panel.get("url", "http://127.0.0.1:57001/3x-ui/").rstrip("/")
-    target = f"{base}/{path}"
-    body = await request.body()
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")}
-    if panel.get("token"):
-        headers["Authorization"] = f"Bearer {panel['token']}"
-    client = _get_xui_client()
-    resp = await client.request(request.method, target, headers=headers, content=body)
-    ct = resp.headers.get("content-type", "text/html")
-    resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in ("content-length", "transfer-encoding", "content-type")}
-    return Response(content=resp.content, status_code=resp.status_code, media_type=ct, headers=resp_headers)
-
-
-# ── Dump directory listing ───────────────────────────────────────────────────
-
-DUMP_DIR = BASE_DIR / "static" / "dump"
-
-@app.get("/dump/")
-def dump_listing():
-    if not DUMP_DIR.exists():
-        return []
-    entries = []
-    for entry in sorted(DUMP_DIR.iterdir()):
-        stat = entry.stat()
-        entries.append({
-            "name": entry.name,
-            "is_dir": entry.is_dir(),
-            "size": stat.st_size if entry.is_file() else None,
-            "modified": stat.st_mtime,
-        })
-    return entries
-
-STATIC_DIR = BASE_DIR / "static"
-if STATIC_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("srapi:app", host="0.0.0.0", port=57000, reload=False, access_log=False)
+    uvicorn.run(app, host="127.0.0.1", port=57000, access_log=False)
