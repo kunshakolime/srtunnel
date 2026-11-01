@@ -118,70 +118,23 @@
               <div id="st-results" class="speed-results" style="display:none"></div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- KERNEL BUFFERS & ROUTING -->
-      <div class="dash-tuning-grid">
-        <div class="card">
-          <div class="port-hdr">
-            <h4>Kernel Buffers (sysctl)</h4>
-            <span class="live-badge" id="buf-live-badge">Live: 16 MB</span>
-          </div>
-          <div class="buffer-wrap">
-            <div class="buffer-inputs">
-              <div class="form-row">
-                <label>Receive Buffer (rmem_max)</label>
-                <input type="text" id="input-rmem" placeholder="e.g. 16 MB" value="16 MB">
+          <div class="card" style="margin-top:12px">
+            <div class="port-hdr">
+              <h4>Network &amp; Buffers</h4>
+              <button class="btn-sm" onclick="openTuningModal()">Edit</button>
+            </div>
+            <div class="tuning-compact">
+              <div class="tuning-compact-row">
+                <span class="tuning-compact-lbl">Socket Buffer</span>
+                <span class="tuning-compact-val" id="dash-buf-val">16 MB</span>
               </div>
-              <div class="form-row">
-                <label>Send Buffer (wmem_max)</label>
-                <input type="text" id="input-wmem" placeholder="e.g. 16 MB" value="16 MB">
+              <div class="tuning-compact-row" style="margin-top:10px">
+                <span class="tuning-compact-lbl">Port Forwards</span>
+                <div class="port-chips" id="dash-routing-chips" style="margin-top:6px">
+                  <span class="port-chip">Loading…</span>
+                </div>
               </div>
-            </div>
-            <div class="buffer-presets">
-              <span class="preset-label">Presets:</span>
-              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('8 MB')">8 MB</button>
-              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('16 MB')">16 MB</button>
-              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('32 MB')">32 MB</button>
-              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('64 MB')">64 MB</button>
-            </div>
-            <div class="tuning-footer">
-              <button class="btn-sm" id="btn-save-buffers" onclick="saveBuffers()">Save Buffers</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="port-hdr">
-            <h4>Port Forwarding (nftables)</h4>
-            <div class="routing-top-ctrls">
-              <label class="routing-toggle">
-                <input type="checkbox" id="chk-routing-enabled" checked onchange="toggleRoutingEnabled(this.checked)">
-                <span>Active</span>
-              </label>
-              <span class="iface-pill" id="routing-iface-pill" title="Active Interface">auto</span>
-            </div>
-          </div>
-          <div class="routing-wrap">
-            <div class="routing-table-wrap">
-              <table class="routing-table">
-                <thead>
-                  <tr>
-                    <th style="width:70px">Proto</th>
-                    <th>Port / Range</th>
-                    <th>Redirect To</th>
-                    <th style="width:30px"></th>
-                  </tr>
-                </thead>
-                <tbody id="routingRulesBody">
-                  <!-- Populated by JS -->
-                </tbody>
-              </table>
-            </div>
-            <div class="routing-footer">
-              <button type="button" class="btn-sm" onclick="addRoutingRow()">＋ Add Rule</button>
-              <button type="button" class="btn-sm" id="btn-save-routing" onclick="saveRouting()">Save &amp; Apply</button>
             </div>
           </div>
         </div>
@@ -537,6 +490,63 @@
   <div class="panel-section">
     <h5>Actions</h5>
     <div class="action-grid" id="panel_actions"></div>
+  </div>
+</div>
+
+<!-- ── NETWORK TUNING MODAL ────────────────────────────────────────────────── -->
+<div id="tuningModal" class="modal">
+  <div class="modal-box" style="max-width:500px">
+    <h4>Network &amp; Buffer Tuning</h4>
+
+    <div style="margin-bottom:18px">
+      <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px">Socket Buffer (sysctl)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+        <div class="form-row" style="margin:0">
+          <label>Receive (rmem_max)</label>
+          <input type="text" id="modal-input-rmem" placeholder="e.g. 16 MB">
+        </div>
+        <div class="form-row" style="margin:0">
+          <label>Send (wmem_max)</label>
+          <input type="text" id="modal-input-wmem" placeholder="e.g. 16 MB">
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text3)">Presets:</span>
+        <button type="button" class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="setModalBufferPreset('8 MB')">8 MB</button>
+        <button type="button" class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="setModalBufferPreset('16 MB')">16 MB</button>
+        <button type="button" class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="setModalBufferPreset('32 MB')">32 MB</button>
+        <button type="button" class="btn-sm" style="padding:2px 7px;font-size:11px" onclick="setModalBufferPreset('64 MB')">64 MB</button>
+      </div>
+    </div>
+
+    <div class="divider">port forwarding (nftables)</div>
+
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.8px">Forwarding Rules</span>
+        <button type="button" class="btn-sm" onclick="addModalRoutingRow()">＋ Add Rule</button>
+      </div>
+      <div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:4px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="color:var(--text3);font-size:10px;text-align:left">
+              <th style="padding:4px 6px;width:70px">Proto</th>
+              <th style="padding:4px 6px">Port / Range</th>
+              <th style="padding:4px 6px">Forward To</th>
+              <th style="padding:4px 6px;width:24px"></th>
+            </tr>
+          </thead>
+          <tbody id="modalRoutingBody">
+            <!-- populated by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="margin-top:22px">
+      <button class="btn-sm" onclick="closeModal('tuningModal')">Cancel</button>
+      <button class="btn" id="btn-save-tuning" onclick="saveModalTuning()">Save &amp; Apply</button>
+    </div>
   </div>
 </div>
 
