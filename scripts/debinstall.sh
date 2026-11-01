@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -e
 
-# usage: debinstall.sh [-d DOMAIN]
+# usage: debinstall.sh [-d DOMAIN] [-u]
 #   -d DOMAIN   request a Let's Encrypt certificate for DOMAIN (certbot
 #               standalone, :80 released by stopping nginx). Without -d a
 #               self-signed certificate is generated so TLS can start.
+#   -u          update release binaries only (skips apt, clone, venv, configs)
 DOMAIN=""
-usage() { echo "usage: $0 [-d DOMAIN]" >&2; }
-while getopts ":d:h" opt; do
+UPDATE_ONLY=""
+usage() { echo "usage: $0 [-d DOMAIN] [-u]" >&2; }
+while getopts ":d:ubh" opt; do
     case "$opt" in
         d) DOMAIN="$OPTARG" ;;
+        u|b) UPDATE_ONLY=1 ;;
         h) usage; exit 0 ;;
         *) usage; exit 1 ;;
     esac
@@ -37,22 +40,7 @@ fetch() { local src="$1" dst="$2"; [[ "$src" == http* ]] || src="${REPO}$src"; c
 source /etc/os-release
 case "$ID" in debian|ubuntu) ;; *) die "Distro $ID not supported." ;; esac
 
-# ── APT Dependencies ──────────────────────────────────────────────────────────
-echo "Installing base dependencies..."
-apt update -qq
-apt install -y -qq git openssh-server stunnel4 python3 python3-venv certbot curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
-
-# ── Python deps are installed into a venv (see "Python venv" below) ─────────
-
-if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
-    git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
-fi
-cd "$BOT_DIR"
-srt() { "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" "$@"; }
-
-# ── Release binaries ──────────────────────────────────────────────────────────
-# Third-party binaries are GitHub release assets, not tracked in git.
-# They live outside the checkout so `git clean` and repo updates cannot touch them.
+# ── Release binaries definition ──────────────────────────────────────────────
 BIN_DIR="/usr/local/libexec/srtunnel"
 ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 case "$ARCH" in
@@ -72,14 +60,49 @@ install_bins() {
     mkdir -p "$BIN_DIR"
     echo "Downloading $ARCH binaries..."
     for b in "${bins[@]}"; do
-        curl -fsSL "$base_url/${b}-${ARCH}" -o "$BIN_DIR/$b" || echo "WARNING: failed to download ${b}-${ARCH}" >&2
-        [ -f "$BIN_DIR/$b" ] && chmod 0755 "$BIN_DIR/$b"
+        curl -fsSL "$base_url/${b}-${ARCH}" -o "$BIN_DIR/.tmp.$b" && \
+            chmod 0755 "$BIN_DIR/.tmp.$b" && \
+            mv -f "$BIN_DIR/.tmp.$b" "$BIN_DIR/$b" || \
+            echo "WARNING: failed to download ${b}-${ARCH}" >&2
     done
 
-    curl -fsSL "$base_url/traffic_meter.bpf.o" -o "$BIN_DIR/traffic_meter.bpf.o" || echo "WARNING: failed to download traffic_meter.bpf.o" >&2
-    [ -f "$BIN_DIR/traffic_meter.bpf.o" ] && chmod 0644 "$BIN_DIR/traffic_meter.bpf.o"
+    curl -fsSL "$base_url/traffic_meter.bpf.o" -o "$BIN_DIR/.tmp.traffic_meter.bpf.o" && \
+        chmod 0644 "$BIN_DIR/.tmp.traffic_meter.bpf.o" && \
+        mv -f "$BIN_DIR/.tmp.traffic_meter.bpf.o" "$BIN_DIR/traffic_meter.bpf.o" || \
+        echo "WARNING: failed to download traffic_meter.bpf.o" >&2
 }
 
+if [[ "$UPDATE_ONLY" == "1" ]]; then
+    if [[ -x "$BOT_DIR/venv/bin/python" && -f "$BOT_DIR/app/cli.py" ]]; then
+        "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" bin --update
+        exit 0
+    fi
+    echo "Updating binaries in $BIN_DIR..."
+    install_bins
+    echo "Restarting active services..."
+    for s in badvpn dropbear hysteria2 slowdns udpcustom zivpn trafficmeter; do
+        systemctl try-restart "$s.service" 2>/dev/null || true
+    done
+    echo "Binaries update complete."
+    exit 0
+fi
+
+# ── APT Dependencies ──────────────────────────────────────────────────────────
+echo "Installing base dependencies..."
+apt update -qq
+apt install -y -qq git openssh-server stunnel4 python3 python3-venv certbot curl openssl nano nftables libpam0g-dev nginx libnginx-mod-stream
+
+# ── Python deps are installed into a venv (see "Python venv" below) ─────────
+
+if [[ "$BOT_DIR" != "$REPO_ROOT" && "$BOT_DIR" != "$SCRIPT_DIR" ]]; then
+    git clone https://github.com/kunshakolime/srtunnel.git "$BOT_DIR"
+fi
+cd "$BOT_DIR"
+srt() { "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" "$@"; }
+
+# ── Release binaries ──────────────────────────────────────────────────────────
+# Third-party binaries are GitHub release assets, not tracked in git.
+# They live outside the checkout so `git clean` and repo updates cannot touch them.
 install_bins
 
 # The arm64 bundle is a subset of amd64; warn instead of failing at service start.

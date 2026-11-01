@@ -7,7 +7,8 @@ Scriptable entrypoint for srtunnel.
     srtunnel                     # same as `srtunnel status`
     srtunnel status [--json]
     srtunnel reconcile [--dry-run|--check] [--force] [--only NAMES] [--skip NAMES] [--json]
-    srtunnel bin                 # show where the release binaries are installed
+    srtunnel bin [--update]      # list or update release binaries
+    srtunnel update              # update release binaries to latest
     srtunnel exec NAME [args]    # run one of them (not on PATH)
     srtunnel cert                # show the TLS certificate
     srtunnel cert -d DOMAIN      # obtain/renew a Let's Encrypt certificate
@@ -169,13 +170,18 @@ def cmd_version(args) -> int:
 
 
 def cmd_bin(args) -> int:
+    from helpers import bins
+
+    if getattr(args, "update", False):
+        return bins.update_bins(restart=not getattr(args, "no_restart", False))
+
     print(BIN_DIR)
-    if not BIN_DIR.is_dir():
-        print("  (not installed — run scripts/debinstall.sh)", file=sys.stderr)
+    installed = bins.list_bins()
+    if not BIN_DIR.is_dir() or not installed:
+        print("  (not installed — run scripts/debinstall.sh or srtunnel bin --update)", file=sys.stderr)
         return 1
-    for p in sorted(BIN_DIR.iterdir()):
-        if p.is_file() and not p.name.startswith("."):
-            print(f"  {p.name}")
+    for name in installed:
+        print(f"  {name}")
     return 0
 
 
@@ -251,8 +257,17 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="run srapi in the foreground")
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("bin", help="list the installed release binaries")
+    p = sub.add_parser("bin", help="list or update installed release binaries")
+    p.add_argument("-u", "--update", action="store_true",
+                   help="download latest binaries from GitHub release")
+    p.add_argument("--no-restart", action="store_true",
+                   help="do not restart active services after update")
     p.set_defaults(func=cmd_bin)
+
+    p = sub.add_parser("update", help="update release binaries to latest")
+    p.add_argument("--no-restart", action="store_true",
+                   help="do not restart active services after update")
+    p.set_defaults(func=lambda args: __import__("helpers.bins", fromlist=["update_bins"]).update_bins(restart=not args.no_restart))
 
     p = sub.add_parser("exec", help="run an installed binary: srtunnel exec NAME [args]")
     p.add_argument("name")
