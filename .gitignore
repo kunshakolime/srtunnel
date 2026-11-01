@@ -32,4 +32,11 @@ hello.txt
 # Generated / downloaded assets
 geoip.dat
 geosite.dat
+
+# Runtime configs
+configs/config.yaml
 configs/xray.json
+configs/zivpn.json
+configs/udp-custom.json
+configs/hysteria2.yaml
+configs/hysteria1.json

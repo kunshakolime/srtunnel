@@ -121,9 +121,13 @@ ln -sf "$BOT_DIR/bin/srtunnel" /usr/sbin/srtunnel
 grep -qxF "/sbin/nologin" /etc/shells || echo "/sbin/nologin" >> /etc/shells
 
 # ── Render Config (hardwired; never clobber an existing deployment) ────────
-[ -f configs/config.yaml ] || cp configs/config.template.yaml configs/config.yaml
-[ -f configs/xray.json ]   || cp configs/xray.template.json configs/xray.json
-echo "Config at configs/config.yaml / configs/xray.json — edit manually if needed."
+[ -f configs/config.yaml ]      || cp configs/config.template.yaml configs/config.yaml
+[ -f configs/xray.json ]        || cp configs/xray.template.json configs/xray.json
+[ -f configs/zivpn.json ]       || cp configs/zivpn.template.json configs/zivpn.json
+[ -f configs/udp-custom.json ]  || cp configs/udp-custom.template.json configs/udp-custom.json
+[ -f configs/hysteria2.yaml ]   || cp configs/hysteria2.template.yaml configs/hysteria2.yaml
+[ -f configs/hysteria1.json ]   || cp configs/hysteria1.template.json configs/hysteria1.json
+echo "Configs initialized from templates if missing — edit manually if needed."
 
 # ── TLS certificate ───────────────────────────────────────────────────────────
 # fullchain.pem / privkey.pem are the stable paths every consumer reads.
