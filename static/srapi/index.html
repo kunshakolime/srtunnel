@@ -120,6 +120,72 @@
           </div>
         </div>
       </div>
+
+      <!-- KERNEL BUFFERS & ROUTING -->
+      <div class="dash-tuning-grid">
+        <div class="card">
+          <div class="port-hdr">
+            <h4>Kernel Buffers (sysctl)</h4>
+            <span class="live-badge" id="buf-live-badge">Live: 16 MB</span>
+          </div>
+          <div class="buffer-wrap">
+            <div class="buffer-inputs">
+              <div class="form-row">
+                <label>Receive Buffer (rmem_max)</label>
+                <input type="text" id="input-rmem" placeholder="e.g. 16 MB" value="16 MB">
+              </div>
+              <div class="form-row">
+                <label>Send Buffer (wmem_max)</label>
+                <input type="text" id="input-wmem" placeholder="e.g. 16 MB" value="16 MB">
+              </div>
+            </div>
+            <div class="buffer-presets">
+              <span class="preset-label">Presets:</span>
+              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('8 MB')">8 MB</button>
+              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('16 MB')">16 MB</button>
+              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('32 MB')">32 MB</button>
+              <button type="button" class="btn-sm preset-btn" onclick="applyBufferPreset('64 MB')">64 MB</button>
+            </div>
+            <div class="tuning-footer">
+              <button class="btn-sm" id="btn-save-buffers" onclick="saveBuffers()">Save Buffers</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="port-hdr">
+            <h4>Port Forwarding (nftables)</h4>
+            <div class="routing-top-ctrls">
+              <label class="routing-toggle">
+                <input type="checkbox" id="chk-routing-enabled" checked onchange="toggleRoutingEnabled(this.checked)">
+                <span>Active</span>
+              </label>
+              <span class="iface-pill" id="routing-iface-pill" title="Active Interface">auto</span>
+            </div>
+          </div>
+          <div class="routing-wrap">
+            <div class="routing-table-wrap">
+              <table class="routing-table">
+                <thead>
+                  <tr>
+                    <th style="width:70px">Proto</th>
+                    <th>Port / Range</th>
+                    <th>Redirect To</th>
+                    <th style="width:30px"></th>
+                  </tr>
+                </thead>
+                <tbody id="routingRulesBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+            <div class="routing-footer">
+              <button type="button" class="btn-sm" onclick="addRoutingRow()">＋ Add Rule</button>
+              <button type="button" class="btn-sm" id="btn-save-routing" onclick="saveRouting()">Save &amp; Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- USERS -->

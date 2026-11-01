@@ -372,6 +372,42 @@ code{font-family:var(--font-mono);background:var(--bg4);padding:2px 6px;border-r
 .svc-lines-btn{padding:3px 10px;font-size:11px}
 .svc-lines-btn.active{background:var(--accent);color:#fff}
 
+/* ── DASHBOARD TUNING (BUFFERS & ROUTING) ── */
+.dash-tuning-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+@media (max-width: 900px) {
+  .dash-tuning-grid { grid-template-columns: 1fr; }
+}
+.buffer-wrap { display: flex; flex-direction: column; gap: 10px; }
+.buffer-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.buffer-presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.preset-label { font-size: 11px; color: var(--text3); }
+.preset-btn { padding: 3px 8px; font-size: 11px; background: var(--bg3); border: 1px solid var(--border); }
+.preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tuning-footer { display: flex; justify-content: flex-end; margin-top: 6px; }
+
+.routing-top-ctrls { display: flex; align-items: center; gap: 8px; }
+.routing-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; color: var(--text2); }
+.iface-pill {
+  font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+  background: rgba(124,106,247,.1); border: 1px solid rgba(124,106,247,.25);
+  border-radius: 6px; padding: 2px 7px;
+}
+.routing-wrap { display: flex; flex-direction: column; gap: 10px; }
+.routing-table-wrap { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.routing-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.routing-table th, .routing-table td { padding: 6px 10px; text-align: left; vertical-align: middle; }
+.routing-table th { background: var(--bg3); color: var(--text3); font-size: 10px; text-transform: uppercase; }
+.routing-table input, .routing-table select { padding: 4px 6px; font-size: 11px; border-radius: 6px; width: 100%; font-family: var(--font-mono); }
+.routing-table .del-btn { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1; }
+.routing-table .del-btn:hover { color: var(--red); }
+.routing-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.live-badge { font-family: var(--font-mono); font-size: 11px; color: var(--green); }
+
 /* ── MOBILE (portrait phones) ────────────────────────────────────────────── */
 @media (max-width: 480px) {
 

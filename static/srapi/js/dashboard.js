@@ -68,6 +68,7 @@ async function loadDashboard() {
     }
     markRefresh();
     loadPorts();
+    loadKernelTuning();
   } catch (e) {
     console.error('Dashboard error', e);
     if (!metricsEl.dataset.built) {
@@ -143,6 +144,188 @@ function filterPorts() {
   document.querySelectorAll('#portsBody .port-item').forEach(it => {
     it.style.display = it.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
+}
+
+// ── Kernel Buffers & Port Forwarding ─────────────────────────────────────────
+
+let _kernelTuningLoading = false;
+
+async function loadKernelTuning() {
+  if (_kernelTuningLoading) return;
+  _kernelTuningLoading = true;
+  try {
+    const res = await apiFetch('/api/kernel-tuning');
+    if (!res.ok) return;
+    const d = await res.json();
+
+    // Buffers
+    const rmemInput = document.getElementById('input-rmem');
+    const wmemInput = document.getElementById('input-wmem');
+    const badge = document.getElementById('buf-live-badge');
+
+    if (rmemInput && (!rmemInput.dataset.touched || rmemInput.dataset.touched === '0')) {
+      rmemInput.value = d.sysctl.rmem_max_human || d.sysctl.rmem_max;
+    }
+    if (wmemInput && (!wmemInput.dataset.touched || wmemInput.dataset.touched === '0')) {
+      wmemInput.value = d.sysctl.wmem_max_human || d.sysctl.wmem_max;
+    }
+    if (badge) {
+      badge.textContent = `Live: R ${d.sysctl.live_rmem_max_human} · W ${d.sysctl.live_wmem_max_human}`;
+    }
+
+    // Routing
+    const chk = document.getElementById('chk-routing-enabled');
+    const pill = document.getElementById('routing-iface-pill');
+    if (chk) chk.checked = !!d.routing.enabled;
+    if (pill) pill.textContent = d.routing.detected_interface || d.routing.interface || 'auto';
+
+    const tbody = document.getElementById('routingRulesBody');
+    if (tbody && (!tbody.dataset.editing || tbody.dataset.editing === '0')) {
+      tbody.innerHTML = '';
+      const rules = d.routing.rules || [];
+      if (rules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:14px">No active forwarding rules</td></tr>';
+      } else {
+        rules.forEach(r => addRoutingRow(r.proto, r.dport, r.redirect));
+      }
+    }
+  } catch (e) {
+    console.error('loadKernelTuning error', e);
+  } finally {
+    _kernelTuningLoading = false;
+  }
+}
+
+function applyBufferPreset(val) {
+  const rmem = document.getElementById('input-rmem');
+  const wmem = document.getElementById('input-wmem');
+  if (rmem) { rmem.value = val; rmem.dataset.touched = '1'; }
+  if (wmem) { wmem.value = val; wmem.dataset.touched = '1'; }
+}
+
+async function saveBuffers() {
+  const btn = document.getElementById('btn-save-buffers');
+  const rmem = document.getElementById('input-rmem').value.trim();
+  const wmem = document.getElementById('input-wmem').value.trim();
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await apiFetch('/api/kernel-tuning', {
+      method: 'POST',
+      body: JSON.stringify({
+        sysctl: { rmem_max: rmem, wmem_max: wmem }
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to save buffers');
+    }
+    toast('Kernel buffers updated live', 'ok');
+    const rmemInput = document.getElementById('input-rmem');
+    const wmemInput = document.getElementById('input-wmem');
+    if (rmemInput) rmemInput.dataset.touched = '0';
+    if (wmemInput) wmemInput.dataset.touched = '0';
+    await loadKernelTuning();
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function addRoutingRow(proto = 'udp', dport = '', redirect = '') {
+  const tbody = document.getElementById('routingRulesBody');
+  if (!tbody) return;
+  if (tbody.children.length === 1 && tbody.children[0].children.length === 1) {
+    tbody.innerHTML = '';
+  }
+  tbody.dataset.editing = '1';
+
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>
+      <select class="rule-proto">
+        <option value="udp" ${proto === 'udp' ? 'selected' : ''}>UDP</option>
+        <option value="tcp" ${proto === 'tcp' ? 'selected' : ''}>TCP</option>
+      </select>
+    </td>
+    <td>
+      <input type="text" class="rule-dport" placeholder="e.g. 53 or 1000-2999" value="${escHtml(dport)}">
+    </td>
+    <td>
+      <input type="text" class="rule-redirect" placeholder="e.g. 8053" value="${escHtml(redirect)}">
+    </td>
+    <td style="text-align:center">
+      <button type="button" class="del-btn" onclick="removeRoutingRow(this)" title="Delete rule">×</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function removeRoutingRow(btn) {
+  const tr = btn.closest('tr');
+  if (tr) tr.remove();
+  const tbody = document.getElementById('routingRulesBody');
+  if (tbody && tbody.children.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:14px">No active forwarding rules</td></tr>';
+  }
+  if (tbody) tbody.dataset.editing = '1';
+}
+
+function toggleRoutingEnabled(checked) {
+  const tbody = document.getElementById('routingRulesBody');
+  if (tbody) tbody.dataset.editing = '1';
+}
+
+async function saveRouting() {
+  const btn = document.getElementById('btn-save-routing');
+  const chk = document.getElementById('chk-routing-enabled');
+  const tbody = document.getElementById('routingRulesBody');
+  if (btn) btn.disabled = true;
+
+  const rules = [];
+  if (tbody) {
+    const rows = tbody.querySelectorAll('tr');
+    rows.forEach(tr => {
+      const protoEl = tr.querySelector('.rule-proto');
+      const dportEl = tr.querySelector('.rule-dport');
+      const redirEl = tr.querySelector('.rule-redirect');
+      if (protoEl && dportEl && redirEl) {
+        const dport = dportEl.value.trim();
+        const redirect = redirEl.value.trim();
+        if (dport && redirect) {
+          rules.push({
+            proto: protoEl.value,
+            dport: dport,
+            redirect: redirect
+          });
+        }
+      }
+    });
+  }
+
+  try {
+    const res = await apiFetch('/api/kernel-tuning', {
+      method: 'POST',
+      body: JSON.stringify({
+        routing: {
+          enabled: chk ? chk.checked : true,
+          rules: rules
+        }
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to apply routing');
+    }
+    toast('Port forwarding rules applied', 'ok');
+    if (tbody) tbody.dataset.editing = '0';
+    await loadKernelTuning();
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────

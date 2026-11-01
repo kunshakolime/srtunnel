@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, Union, List
 from pathlib import Path
-import logging, traceback
+import logging, traceback, yaml
 
 from helpers import monitor, dns, speedtest as st
 from helpers.deps import CurrentUser, cfg, load_scope, save_scope, load_serverlist, save_serverlist
@@ -223,3 +223,165 @@ def dns_delete(record_id: str, user: CurrentUser):
         raise HTTPException(status_code=400, detail="Could not delete record")
     logger.info("DNS record deleted: %s by %s", record_id, user)
     return {"status": "deleted"}
+
+
+# ── Kernel Tuning (sysctl buffers & nftables port routing) ───────────────────
+
+def _fmt_bytes(n: int) -> str:
+    if n >= 1024 * 1024 * 1024 and n % (1024 * 1024 * 1024) == 0:
+        return f"{n // (1024 * 1024 * 1024)} GB"
+    if n >= 1024 * 1024 and n % (1024 * 1024) == 0:
+        return f"{n // (1024 * 1024)} MB"
+    if n >= 1024 and n % 1024 == 0:
+        return f"{n // 1024} KB"
+    if n >= 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024 * 1024):.1f} GB"
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n} B"
+
+def _parse_bytes(val: Union[str, int]) -> int:
+    if isinstance(val, int):
+        return val
+    s = str(val).strip().upper()
+    if not s:
+        return 16777216
+    units = {
+        "GB": 1024 * 1024 * 1024,
+        "GIB": 1024 * 1024 * 1024,
+        "G": 1024 * 1024 * 1024,
+        "MB": 1024 * 1024,
+        "MIB": 1024 * 1024,
+        "M": 1024 * 1024,
+        "KB": 1024,
+        "KIB": 1024,
+        "K": 1024,
+        "B": 1,
+    }
+    for unit, mult in sorted(units.items(), key=lambda x: -len(x[0])):
+        if s.endswith(unit):
+            num = float(s[:-len(unit)].strip())
+            return int(num * mult)
+    return int(float(s))
+
+def _read_proc_sysctl(name: str) -> Optional[int]:
+    p = Path("/proc/sys/net/core") / name
+    if p.is_file():
+        try:
+            return int(p.read_text().strip())
+        except Exception:
+            pass
+    return None
+
+class SysctlUpdateRequest(BaseModel):
+    rmem_max: Optional[Union[str, int]] = None
+    wmem_max: Optional[Union[str, int]] = None
+
+class RoutingRule(BaseModel):
+    proto: str = "udp"
+    dport: Union[str, int]
+    redirect: Union[str, int]
+
+class RoutingUpdateRequest(BaseModel):
+    enabled: Optional[bool] = None
+    interface: Optional[str] = None
+    rules: Optional[List[RoutingRule]] = None
+
+class KernelTuningRequest(BaseModel):
+    sysctl: Optional[SysctlUpdateRequest] = None
+    routing: Optional[RoutingUpdateRequest] = None
+
+@router.get("/kernel-tuning")
+def get_kernel_tuning(user: CurrentUser):
+    from helpers import reconcile
+    cfg_data = reconcile._load_cfg()
+    s_cfg = cfg_data.get("sysctl") or {}
+    r_cfg = cfg_data.get("routing") or {}
+
+    live_rmem = _read_proc_sysctl("rmem_max") or s_cfg.get("rmem_max", 16777216)
+    live_wmem = _read_proc_sysctl("wmem_max") or s_cfg.get("wmem_max", 16777216)
+
+    cfg_rmem = s_cfg.get("rmem_max", live_rmem)
+    cfg_wmem = s_cfg.get("wmem_max", live_wmem)
+
+    rules = []
+    for r in r_cfg.get("rules") or []:
+        rules.append({
+            "proto": r.get("proto", "udp"),
+            "dport": str(r.get("dport", "")),
+            "redirect": str(r.get("redirect", "")),
+        })
+
+    detected_iface = reconcile._detect_interface(cfg_data)
+
+    return {
+        "sysctl": {
+            "rmem_max": cfg_rmem,
+            "wmem_max": cfg_wmem,
+            "rmem_max_human": _fmt_bytes(cfg_rmem),
+            "wmem_max_human": _fmt_bytes(cfg_wmem),
+            "live_rmem_max": live_rmem,
+            "live_wmem_max": live_wmem,
+            "live_rmem_max_human": _fmt_bytes(live_rmem),
+            "live_wmem_max_human": _fmt_bytes(live_wmem),
+        },
+        "routing": {
+            "enabled": r_cfg.get("enabled", True),
+            "interface": r_cfg.get("interface", "auto"),
+            "detected_interface": detected_iface,
+            "rules": rules,
+        }
+    }
+
+@router.post("/kernel-tuning")
+def update_kernel_tuning(data: KernelTuningRequest, user: CurrentUser):
+    import yaml
+    from helpers import reconcile
+    cfg_path = _BASE_DIR / "configs" / "config.yaml"
+    if not cfg_path.is_file():
+        cfg_path = _BASE_DIR / "config.yaml"
+    if not cfg_path.is_file():
+        raise HTTPException(status_code=404, detail="config.yaml not found")
+
+    raw = yaml.safe_load(cfg_path.read_text()) or {}
+
+    if data.sysctl:
+        s_cfg = raw.get("sysctl") or {}
+        if data.sysctl.rmem_max is not None:
+            s_cfg["rmem_max"] = _parse_bytes(data.sysctl.rmem_max)
+        if data.sysctl.wmem_max is not None:
+            s_cfg["wmem_max"] = _parse_bytes(data.sysctl.wmem_max)
+        raw["sysctl"] = s_cfg
+
+    if data.routing:
+        r_cfg = raw.get("routing") or {}
+        if data.routing.enabled is not None:
+            r_cfg["enabled"] = bool(data.routing.enabled)
+        if data.routing.interface is not None:
+            r_cfg["interface"] = data.routing.interface
+        if data.routing.rules is not None:
+            r_cfg["rules"] = [r.dict() for r in data.routing.rules]
+        raw["routing"] = r_cfg
+
+        mgr = raw.get("manager") or {}
+        enable_list = mgr.get("enable") or []
+        if r_cfg.get("enabled", True):
+            if "srtunnel-routing" not in enable_list:
+                enable_list.append("srtunnel-routing")
+        else:
+            if "srtunnel-routing" in enable_list:
+                enable_list.remove("srtunnel-routing")
+        mgr["enable"] = enable_list
+        raw["manager"] = mgr
+
+    cfg_path.write_text(yaml.dump(raw, sort_keys=False))
+
+    res = reconcile.run(force=True)
+    logger.info("Kernel tuning updated by %s (reconcile error: %s)", user, res.get("error"))
+
+    if res.get("error"):
+        raise HTTPException(status_code=500, detail=f"Reconcile failed: {res['error']}")
+
+    return get_kernel_tuning(user)
