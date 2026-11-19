@@ -488,6 +488,29 @@
   </div>
 </div>
 
+<!-- ── EDIT UNIT MODAL ─────────────────────────────────────────────────────── -->
+<div id="editUnitModal" class="modal">
+  <div class="modal-box" style="max-width:760px;width:95%">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px">
+      <h4 style="margin:0">Edit Unit: <span id="editUnitName" style="color:var(--accent);font-family:var(--font-mono)"></span></h4>
+      <span id="editUnitPath" style="font-size:11px;color:var(--text3);font-family:var(--font-mono)"></span>
+    </div>
+    <div class="form-row" style="margin-bottom:12px">
+      <textarea id="editUnitContent" spellcheck="false" style="width:100%;height:52vh;font-family:var(--font-mono);font-size:12px;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;line-height:1.5;resize:vertical;color:var(--text1);box-sizing:border-box"></textarea>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;gap:10px">
+      <label class="form-check" style="cursor:pointer;margin:0;user-select:none">
+        <input type="checkbox" id="editUnitApply" checked>
+        <span style="font-size:12px;color:var(--text2)">Reconcile &amp; reload systemd daemon</span>
+      </label>
+      <div class="modal-footer" style="margin:0">
+        <button class="btn-sm" onclick="closeModal('editUnitModal')">Cancel</button>
+        <button class="btn" id="saveUnitBtn" onclick="doSaveUnit()">Save Unit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <!-- ── SCRIPTS ────────────────────────────────────────────────────────────── -->

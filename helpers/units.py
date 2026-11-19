@@ -19,6 +19,22 @@ def managed() -> list[str]:
     return [p.stem for p in sorted(UNIT_DIR.glob("*.service"))]
 
 
+def unit_path(name: str) -> Path:
+    return UNIT_DIR / f"{name}.service"
+
+
+def get_unit_content(name: str) -> str:
+    p = unit_path(name)
+    if not p.is_file():
+        raise FileNotFoundError(f"Unit template not found: {name}.service")
+    return p.read_text()
+
+
+def save_unit_content(name: str, content: str) -> None:
+    p = unit_path(name)
+    p.write_text(content if content.endswith("\n") else content + "\n")
+
+
 def states(names: list[str] | None = None) -> dict[str, dict]:
     """State for many units in one `systemctl show` call.
 

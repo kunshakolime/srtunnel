@@ -396,7 +396,8 @@ def _enable_units() -> dict[str, str]:
 
 
 def run(dry_run: bool = False, force: bool = False,
-        only: Optional[str] = None, skip: Optional[str] = None) -> dict:
+        only: Optional[str] = None, skip: Optional[str] = None,
+        restart_units: bool = True) -> dict:
     items = plan(force=force, only=only, skip=skip)
     changes = [a for _, a in items if a.status != "same"]
     result = {
@@ -491,11 +492,12 @@ def run(dry_run: bool = False, force: bool = False,
     unit_changes = [(t, a) for t, a in written if t.kind == "unit"]
     if unit_changes:
         _run(["systemctl", "daemon-reload"])
-        for t, _ in unit_changes:
-            name = t.dst.stem
-            if _active(name):
-                ok, out = _run(["systemctl", "restart", f"{name}.service"], timeout=60)
-                result["validated"][f"restart:{name}"] = "ok" if ok else out
+        if restart_units:
+            for t, _ in unit_changes:
+                name = t.dst.stem
+                if _active(name):
+                    ok, out = _run(["systemctl", "restart", f"{name}.service"], timeout=60)
+                    result["validated"][f"restart:{name}"] = "ok" if ok else out
 
     # ── simple restarts ──────────────────────────────────────────────────────
     for kind in ("stunnel", "cockpit"):

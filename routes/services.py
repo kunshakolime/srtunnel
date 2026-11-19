@@ -21,6 +21,11 @@ class ServiceStatusRequest(BaseModel):
     status: str  # "enable" | "disable"
 
 
+class UnitUpdateRequest(BaseModel):
+    content: str
+    apply: bool = True
+
+
 def _require(name: str):
     if name not in units.managed():
         raise HTTPException(status_code=404, detail="service not found")
@@ -119,3 +124,43 @@ def set_service_status(name: str, data: ServiceStatusRequest, user: CurrentUser)
         raise HTTPException(status_code=400, detail=f"Failed to set {name} {data.status}")
     logger.info("Service status set: %s → %s by %s", name, data.status, user)
     return {"service": name, "status": data.status}
+
+
+@router.get("/{name}/unit")
+def get_service_unit(name: str, user: CurrentUser):
+    _require(name)
+    try:
+        content = units.get_unit_content(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Unit file for {name} not found")
+    return {"name": name, "unit": f"{name}.service", "content": content}
+
+
+@router.put("/{name}/unit")
+@router.post("/{name}/unit")
+def update_service_unit(name: str, data: UnitUpdateRequest, user: CurrentUser):
+    _require(name)
+    content = data.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Unit content cannot be empty")
+
+    units.save_unit_content(name, data.content)
+    logger.info("Unit %s.service updated by %s", name, user)
+
+    reconciled = False
+    if data.apply:
+        try:
+            from helpers import reconcile
+            reconcile.run(only="units", force=True, restart_units=(name != "srapi"))
+            reconciled = True
+            logger.info("Reconciled units after %s.service update", name)
+        except Exception as e:
+            logger.error("Failed to reconcile unit %s: %s", name, e)
+            raise HTTPException(status_code=500, detail=f"Saved, but reconcile failed: {e}")
+
+    return {
+        "service": name,
+        "unit": f"{name}.service",
+        "reconciled": reconciled,
+        "status": "updated",
+    }

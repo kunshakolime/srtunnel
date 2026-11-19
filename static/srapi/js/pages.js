@@ -74,6 +74,7 @@ async function loadServices() {
                  <button class="btn-danger btn-icon" onclick="svcAction('${s.name}','stop')">■ Stop</button>`
               : `<button class="btn-green btn-sm" onclick="svcAction('${s.name}','start')">▶ Start</button>`
             }
+            <button class="btn-sm" onclick="editUnit('${s.name}')" title="Edit systemd unit">✎ Edit</button>
             <select class="btn-sm" style="padding:5px 8px;font-size:11px;font-family:var(--font-mono)"
               onchange="setSvcStatus('${s.name}',this.value)">
               <option value="enable"  ${s.status==='enable' ?'selected':''}>enabled</option>
@@ -227,6 +228,90 @@ async function spawnServices() {
   } else {
     const d = await res.json();
     toast(d.detail || 'Failed', 'err');
+  }
+}
+
+// ── Edit Unit ─────────────────────────────────────────────────────────────────
+
+let _editingUnit = null;
+
+async function editUnit(name) {
+  _editingUnit = name;
+  const nameEl = document.getElementById('editUnitName');
+  const pathEl = document.getElementById('editUnitPath');
+  const textEl = document.getElementById('editUnitContent');
+  const applyEl = document.getElementById('editUnitApply');
+
+  if (nameEl) nameEl.textContent = name + '.service';
+  if (pathEl) pathEl.textContent = 'configs/units/' + name + '.service';
+  if (textEl) {
+    textEl.value = 'Loading unit content...';
+    textEl.disabled = true;
+  }
+  if (applyEl) applyEl.checked = true;
+
+  openModal('editUnitModal');
+
+  try {
+    const res = await apiFetch(`/api/services/${name}/unit`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to fetch unit' }));
+      toast(err.detail || 'Failed to fetch unit', 'err');
+      closeModal('editUnitModal');
+      return;
+    }
+    const data = await res.json();
+    if (textEl) {
+      textEl.value = data.content || '';
+      textEl.disabled = false;
+      textEl.focus();
+    }
+  } catch (e) {
+    toast('Network error loading unit', 'err');
+    closeModal('editUnitModal');
+  }
+}
+
+async function doSaveUnit() {
+  if (!_editingUnit) return;
+  const textEl = document.getElementById('editUnitContent');
+  const applyEl = document.getElementById('editUnitApply');
+  const btn = document.getElementById('saveUnitBtn');
+  const name = _editingUnit;
+  const content = textEl ? textEl.value : '';
+  const apply = applyEl ? applyEl.checked : true;
+
+  if (!content.trim()) {
+    toast('Unit content cannot be empty', 'err');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await apiFetch(`/api/services/${name}/unit`, {
+      method: 'PUT',
+      body: JSON.stringify({ content, apply })
+    });
+    if (res.ok) {
+      const d = await res.json();
+      toast(d.reconciled ? `${name}.service saved & reconciled!` : `${name}.service saved!`);
+      closeModal('editUnitModal');
+      loadServices();
+    } else {
+      const d = await res.json().catch(() => ({ detail: 'Save failed' }));
+      toast(d.detail || 'Save failed', 'err');
+    }
+  } catch (e) {
+    toast('Network error saving unit', 'err');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save Unit';
+    }
   }
 }
 
