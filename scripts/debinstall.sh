@@ -53,7 +53,7 @@ install_bins() {
     local base_url="https://github.com/kunshakolime/srtunnel/releases/latest/download"
     local bins=()
     case "$ARCH" in
-        amd64) bins=(badvpn-udpgw dnstt-server hysteria2 udp-custom udp-zivpn ipmask_tool traffic_meter_user) ;;
+        amd64) bins=(badvpn-udpgw vaydns-server hysteria2 udp-custom udp-zivpn ipmask_tool traffic_meter_user) ;;
         arm64) bins=(badvpn-udpgw udp-zivpn ipmask_tool traffic_meter_user) ;;
     esac
 
@@ -102,7 +102,7 @@ srt() { "$BOT_DIR/venv/bin/python" "$BOT_DIR/app/cli.py" "$@"; }
 install_bins
 
 # The arm64 bundle is a subset of amd64; warn instead of failing at service start.
-for b in badvpn-udpgw dnstt-server hysteria2 udp-custom udp-zivpn; do
+for b in badvpn-udpgw vaydns-server hysteria2 udp-custom udp-zivpn; do
     [ -x "$BIN_DIR/$b" ] || echo "WARNING: no $ARCH build for $b — its service(s) will fail" >&2
 done
 
@@ -146,7 +146,7 @@ rm -f /etc/nginx/sites-enabled/default
 : > /etc/motd
 
 # ── SlowDNS key ───────────────────────────────────────────────────────────────
-"$BIN_DIR/dnstt-server" -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
+"$BIN_DIR/vaydns-server" -gen-key -privkey-file slowdns.key -pubkey-file slowdns.pub 2>/dev/null || true
 
 # ── Dashboard admin group ─────────────────────────────────────────────────────
 groupadd -f srtadmin 2>/dev/null || true
